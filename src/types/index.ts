@@ -58,6 +58,8 @@ export interface LeadPortfolioDetail {
   totalEquity: number;
   roi7d: number;
   mdd7d: number;
+  winRate?: number;
+  copierPnl?: number;
   followerCount: number;
   maxFollowerCount: number;
   positionShow: boolean; // false jika leader me-private tab Positions

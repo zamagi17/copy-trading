@@ -32,7 +32,7 @@ async function resolveBinanceIpViaDoH(): Promise<string | null> {
 }
 
 export class CopyTradeScraper {
-  private detailCache: Map<string, { data: any; lastFetch: number }> = new Map();
+  private detailCache: Map<string, { data: any; perf?: any; lastFetch: number }> = new Map();
 
   private async createClient(proxy?: ProxyConfig): Promise<AxiosInstance> {
     const config: AxiosRequestConfig = {
@@ -245,16 +245,26 @@ export class CopyTradeScraper {
       const cached = this.detailCache.get(id);
       let data = cached?.data;
 
-      // Ambil detail portofolio jika belum di-cache atau cache sudah lebih dari 45 detik
+      let perf = cached?.perf;
+
+      // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 45 detik
       if (!cached || timestamp - cached.lastFetch > 45000) {
         try {
           const client = await this.createClient(proxy);
-          const url = `/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/detail?portfolioId=${id}`;
-          const res = await client.get(url);
-          const root = res.data;
-          if (root && (root.code === '000000' || !root.code) && root.data) {
-            data = root.data;
-            this.detailCache.set(id, { data, lastFetch: timestamp });
+          const [detailRes, perfRes] = await Promise.allSettled([
+            client.get(`/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/detail?portfolioId=${id}`),
+            client.get(`/bapi/futures/v1/public/future/copy-trade/lead-portfolio/performance?portfolioId=${id}&timeRange=7D`)
+          ]);
+
+          if (detailRes.status === 'fulfilled' && detailRes.value.data?.data) {
+            data = detailRes.value.data.data;
+          }
+          if (perfRes.status === 'fulfilled' && perfRes.value.data?.data) {
+            perf = perfRes.value.data.data;
+          }
+
+          if (data || perf) {
+            this.detailCache.set(id, { data, perf, lastFetch: timestamp });
           }
         } catch {
           // Jika gagal, gunakan data lama yang ada di cache
@@ -264,8 +274,10 @@ export class CopyTradeScraper {
       const nickname = data?.nickname || data?.leadPortfolioName || `Leader ${id}`;
       const avatarUrl = data?.avatarUrl || '';
       const totalEquity = Number(data?.marginBalance ?? data?.totalEquity ?? data?.leadMargin ?? data?.currentBalance ?? 0);
-      const roi7d = Number(data?.roi7d ?? data?.roi ?? 0);
-      const mdd7d = Number(data?.mdd7d ?? 0);
+      const roi7d = Number(perf?.roi ?? data?.roi7d ?? data?.roi ?? 0);
+      const mdd7d = Number(perf?.mdd ?? data?.mdd7d ?? 0);
+      const winRate = Number(perf?.winRate ?? 0);
+      const copierPnl = Number(perf?.copierPnl ?? data?.copierPnl ?? 0);
       const followerCount = Number(data?.currentCopyCount ?? data?.followerCount ?? 0);
       const maxFollowerCount = Number(data?.maxCopyCount ?? data?.maxFollowerCount ?? 1000);
       const positionShow = data?.positionShow !== false; // false jika di-private oleh leader
@@ -286,6 +298,8 @@ export class CopyTradeScraper {
         totalEquity,
         roi7d,
         mdd7d,
+        winRate,
+        copierPnl,
         followerCount,
         maxFollowerCount,
         positionShow,

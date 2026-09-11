@@ -346,12 +346,20 @@ function updateTickData(payload) {
   if (payload.leader) {
     const l = payload.leader;
     if (l.nickname) leaderName.innerText = l.nickname;
-    if (l.totalEquity) leaderEquityVal.innerText = `$${formatNumber(l.totalEquity)}`;
+    if (l.totalEquity) leaderEquityVal.innerText = `${formatNumber(l.totalEquity)}`;
     if (l.roi7d !== undefined) {
       leaderRoiVal.innerText = `${l.roi7d >= 0 ? '+' : ''}${l.roi7d.toFixed(2)}%`;
       leaderRoiVal.className = `metric-val ${l.roi7d >= 0 ? 'text-green' : 'text-red'}`;
     }
     if (l.mdd7d !== undefined) leaderMddVal.innerText = `${l.mdd7d.toFixed(2)}%`;
+    if (l.followerCount !== undefined && leaderFollowersBadge) {
+      const isFull = l.maxFollowerCount && l.followerCount >= l.maxFollowerCount;
+      leaderFollowersBadge.innerText = `Followers: ${l.followerCount} / ${l.maxFollowerCount || 1000}${isFull ? ' (FULL)' : ''}`;
+      leaderFollowersBadge.className = `badge ${isFull ? 'badge-yellow' : 'badge-green'}`;
+    }
+    if (l.avatarUrl && leaderAvatar) {
+      leaderAvatar.innerHTML = `<img src="${l.avatarUrl}" alt="${l.nickname || 'Leader'}" style="width: 100%; height: 100%; border-radius: 12px; object-fit: cover;" />`;
+    }
 
     // Render Table Perbandingan Posisi
     renderPositionsTable(l.positions || [], payload.user?.positions || [], l.orders || [], l.positionShow);
