@@ -108,3 +108,18 @@ export interface EngineStatus {
   activePairs: string[];
   lastError: string | null;
 }
+
+export interface ClosedTrade {
+  id: string;
+  symbol: string;
+  positionSide: 'LONG' | 'SHORT';
+  action: 'FULL_CLOSE' | 'PARTIAL_CLOSE' | 'EMERGENCY_SL' | 'PANIC_CLOSE';
+  qty: number;
+  entryPrice: number;
+  closePrice: number;
+  realizedPnl: number;
+  pnlPct: number;
+  timestamp: number;
+  closedAt: string;
+  isPaper: boolean;
+}

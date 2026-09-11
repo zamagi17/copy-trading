@@ -4,6 +4,8 @@ let ws = null;
 let currentConfig = null;
 let currentStatus = null;
 let isEngineActive = false;
+let currentTableTab = 'active';
+let closedTradesList = [];
 
 // DOM Elements
 const engineStatusBadge = document.getElementById('engineStatusBadge');
@@ -244,12 +246,19 @@ function connectWebSocket() {
         updateConfigSpecs(payload.config);
         if (payload.user) {
           updateUserAccountUI(payload.user.balance, payload.user.positions);
+          if (payload.user.closedTrades) {
+            updateClosedTradesUI(payload.user.closedTrades);
+          }
         }
         if (payload.logs) {
           payload.logs.reverse().forEach((l) => appendLog(l.level, l.message, l.timestamp));
         }
       } else if (type === 'TICK') {
         updateTickData(payload);
+      } else if (type === 'CLOSED_TRADE') {
+        closedTradesList.unshift(payload);
+        if (closedTradesList.length > 250) closedTradesList.pop();
+        updateClosedTradesUI(closedTradesList);
       } else if (type === 'LOG') {
         appendLog(payload.level, payload.message, payload.timestamp);
       } else if (type === 'AUTH_ERROR') {
@@ -284,6 +293,15 @@ async function fetchInitialData() {
     if (statusData.user) {
       updateUserAccountUI(statusData.user.balance, statusData.user.positions);
     }
+
+    // Ambil histori trade selesai
+    try {
+      const closedRes = await apiFetch('/api/closed-trades');
+      const closedData = await closedRes.json();
+      if (closedData.success && Array.isArray(closedData.trades)) {
+        updateClosedTradesUI(closedData.trades);
+      }
+    } catch {}
   } catch (err) {
     console.error('Gagal memuat data awal:', err);
   }
@@ -417,6 +435,9 @@ function updateTickData(payload) {
   // Update User Account
   if (payload.user) {
     updateUserAccountUI(payload.user.balance, payload.user.positions);
+    if (payload.user.closedTrades) {
+      updateClosedTradesUI(payload.user.closedTrades);
+    }
   }
 }
 
@@ -439,6 +460,8 @@ function updateUserAccountUI(balance, positions) {
 
   const count = positions ? positions.length : 0;
   userOpenPositionsCount.innerText = `${count} Posisi`;
+  const activeCountBadge = document.getElementById('activeCountBadge');
+  if (activeCountBadge) activeCountBadge.innerText = count;
 }
 
 function renderPositionsTable(leaderPositions = [], userPositions = [], orders = [], positionShow = true) {
@@ -535,6 +558,174 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
 
   positionsTableBody.innerHTML = html;
   lucide.createIcons({ root: positionsTableBody });
+}
+
+function switchTableTab(tab) {
+  currentTableTab = tab;
+  const tabBtnActive = document.getElementById('tabBtnActive');
+  const tabBtnClosed = document.getElementById('tabBtnClosed');
+  const viewActive = document.getElementById('viewActivePositions');
+  const viewClosed = document.getElementById('viewClosedTrades');
+  const btnTableAction = document.getElementById('btnTableAction');
+  const iconTableAction = document.getElementById('iconTableAction');
+
+  if (tab === 'active') {
+    if (tabBtnActive) tabBtnActive.classList.add('active');
+    if (tabBtnClosed) tabBtnClosed.classList.remove('active');
+    if (viewActive) viewActive.style.display = 'block';
+    if (viewClosed) viewClosed.style.display = 'none';
+    if (btnTableAction) btnTableAction.title = 'Segarkan Data';
+    if (iconTableAction) iconTableAction.setAttribute('data-lucide', 'refresh-cw');
+  } else {
+    if (tabBtnActive) tabBtnActive.classList.remove('active');
+    if (tabBtnClosed) tabBtnClosed.classList.add('active');
+    if (viewActive) viewActive.style.display = 'none';
+    if (viewClosed) viewClosed.style.display = 'block';
+    if (btnTableAction) btnTableAction.title = 'Hapus Riwayat Selesai';
+    if (iconTableAction) iconTableAction.setAttribute('data-lucide', 'trash-2');
+    renderClosedTradesTable();
+  }
+  lucide.createIcons({ root: document.querySelector('.table-section') });
+}
+
+function handleTableAction() {
+  if (currentTableTab === 'active') {
+    fetchInitialData();
+  } else {
+    clearClosedTrades();
+  }
+}
+
+function updateClosedTradesUI(trades) {
+  closedTradesList = Array.isArray(trades) ? trades : [];
+  const closedBadge = document.getElementById('closedCountBadge');
+  if (closedBadge) closedBadge.innerText = closedTradesList.length;
+
+  // Hitung Summary Stats
+  const totalTrades = closedTradesList.length;
+  let winCount = 0;
+  let lossCount = 0;
+  let totalRealizedPnl = 0;
+
+  for (const t of closedTradesList) {
+    const pnl = Number(t.realizedPnl) || 0;
+    totalRealizedPnl += pnl;
+    if (pnl > 0) winCount++;
+    else if (pnl < 0) lossCount++;
+  }
+
+  const winRate = totalTrades > 0 ? ((winCount / totalTrades) * 100).toFixed(1) : '0.0';
+
+  const histTotalTrades = document.getElementById('histTotalTrades');
+  const histWinRate = document.getElementById('histWinRate');
+  const histTotalPnl = document.getElementById('histTotalPnl');
+  const histWinLoss = document.getElementById('histWinLoss');
+
+  if (histTotalTrades) histTotalTrades.innerText = totalTrades;
+  if (histWinRate) histWinRate.innerText = `${winRate}%`;
+  if (histTotalPnl) {
+    histTotalPnl.innerText = `${totalRealizedPnl >= 0 ? '+' : ''}$${totalRealizedPnl.toFixed(2)} USDT`;
+    histTotalPnl.className = `stat-chip-val ${totalRealizedPnl > 0 ? 'text-green' : totalRealizedPnl < 0 ? 'text-red' : ''}`;
+  }
+  if (histWinLoss) histWinLoss.innerText = `${winCount}W / ${lossCount}L`;
+
+  if (currentTableTab === 'closed') {
+    renderClosedTradesTable();
+  }
+}
+
+function renderClosedTradesTable() {
+  const tbody = document.getElementById('closedTradesTableBody');
+  if (!tbody) return;
+
+  if (closedTradesList.length === 0) {
+    tbody.innerHTML = `
+      <tr class="empty-row">
+        <td colspan="9">
+          <div class="empty-state">
+            <i data-lucide="history" class="empty-icon"></i>
+            <p>Belum ada riwayat transaksi yang ditutup.</p>
+            <small>Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.</small>
+          </div>
+        </td>
+      </tr>
+    `;
+    lucide.createIcons({ root: tbody });
+    return;
+  }
+
+  let html = '';
+  for (const t of closedTradesList) {
+    const pnl = Number(t.realizedPnl) || 0;
+    const isWin = pnl >= 0;
+    const pnlClass = isWin ? 'text-green' : 'text-red';
+    const sideBadgeClass = t.positionSide === 'LONG' ? 'badge-green' : 'badge-red';
+
+    let actionBadge = '';
+    if (t.action === 'FULL_CLOSE') {
+      actionBadge = '<span class="badge-action badge-action-full">Tutup Penuh</span>';
+    } else if (t.action === 'PARTIAL_CLOSE') {
+      actionBadge = '<span class="badge-action badge-action-partial">Tutup Parsial</span>';
+    } else if (t.action === 'EMERGENCY_SL') {
+      actionBadge = '<span class="badge-action badge-action-sl">Emergency SL</span>';
+    } else if (t.action === 'PANIC_CLOSE') {
+      actionBadge = '<span class="badge-action badge-action-panic">Panic Close</span>';
+    } else {
+      actionBadge = `<span class="badge-action">${t.action}</span>`;
+    }
+
+    const modeBadge = t.isPaper 
+      ? '<span class="badge badge-purple" style="font-size: 0.65rem;">Simulasi</span>' 
+      : '<span class="badge badge-green" style="font-size: 0.65rem;">Live</span>';
+
+    html += `
+      <tr>
+        <td style="color: var(--text-dim); font-size: 0.76rem;">${t.closedAt}</td>
+        <td>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <strong>${t.symbol}</strong>
+            <span class="badge ${sideBadgeClass}" style="font-size: 0.68rem; padding: 1px 6px;">${t.positionSide}</span>
+          </div>
+        </td>
+        <td>${actionBadge}</td>
+        <td>${t.qty}</td>
+        <td>$${formatPrice(t.entryPrice)}</td>
+        <td>$${formatPrice(t.closePrice)}</td>
+        <td class="${pnlClass}" style="font-weight: 700;">
+          ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT
+        </td>
+        <td class="${pnlClass}" style="font-weight: 600;">
+          ${(t.pnlPct || 0) >= 0 ? '+' : ''}${Number(t.pnlPct || 0).toFixed(2)}%
+        </td>
+        <td>${modeBadge}</td>
+      </tr>
+    `;
+  }
+
+  tbody.innerHTML = html;
+  lucide.createIcons({ root: tbody });
+}
+
+async function clearClosedTrades() {
+  if (closedTradesList.length === 0) {
+    alert('Riwayat transaksi selesai masih kosong.');
+    return;
+  }
+  if (!confirm('Apakah Anda yakin ingin menghapus seluruh riwayat trade selesai?')) return;
+  try {
+    const res = await apiFetch('/api/clear-closed-trades', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      closedTradesList = [];
+      updateClosedTradesUI([]);
+      appendLog('INFO', '🧹 Riwayat trade selesai telah dibersihkan.');
+      alert('✅ Riwayat trade selesai berhasil dibersihkan!');
+    } else {
+      alert(`Gagal menghapus riwayat: ${data.message}`);
+    }
+  } catch (e) {
+    alert(`Error: ${e.message}`);
+  }
 }
 
 function appendLog(level, message, timestamp) {

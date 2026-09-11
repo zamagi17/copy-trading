@@ -182,47 +182,105 @@
 
     <!-- Main Workspace: Positions Table & Live Terminal -->
     <main class="main-layout">
-      <!-- Left / Top: Active Positions Comparison -->
+      <!-- Left / Top: Active Positions & Closed Trades History Tabs -->
       <section class="glass-card table-section">
         <div class="section-bar">
-          <div class="section-title">
-            <i data-lucide="table-2" class="section-icon"></i>
-            <h2>Sinkronisasi Posisi Real-Time</h2>
+          <div class="table-tabs">
+            <button class="tab-btn active" id="tabBtnActive" onclick="switchTableTab('active')">
+              <i data-lucide="layers"></i> Posisi Terbuka <span class="tab-badge" id="activeCountBadge">0</span>
+            </button>
+            <button class="tab-btn" id="tabBtnClosed" onclick="switchTableTab('closed')">
+              <i data-lucide="history"></i> Riwayat Trade Selesai <span class="tab-badge" id="closedCountBadge">0</span>
+            </button>
           </div>
           <div class="table-actions">
-            <span class="pulse-indicator"><span class="pulse-ring"></span> Live Stream</span>
-            <button class="btn-sm btn-ghost" onclick="refreshData()" title="Segarkan Data">
-              <i data-lucide="refresh-cw"></i>
+            <span class="pulse-indicator" id="liveIndicator"><span class="pulse-ring"></span> Live</span>
+            <button class="btn-sm btn-ghost" id="btnTableAction" onclick="handleTableAction()" title="Segarkan Data">
+              <i data-lucide="refresh-cw" id="iconTableAction"></i>
             </button>
           </div>
         </div>
 
-        <div class="table-responsive">
-          <table class="data-table" id="positionsTable">
-            <thead>
-              <tr>
-                <th>Simbol & Arah</th>
-                <th>Posisi Leader</th>
-                <th>Entry Leader</th>
-                <th>Posisi Akun Anda</th>
-                <th>Entry Anda</th>
-                <th>Rasio Akun</th>
-                <th>Floating PnL</th>
-                <th>Status Sinkron</th>
-              </tr>
-            </thead>
-            <tbody id="positionsTableBody">
-              <tr class="empty-row">
-                <td colspan="8">
-                  <div class="empty-state">
-                    <i data-lucide="inbox" class="empty-icon"></i>
-                    <p>Leader saat ini belum memiliki posisi aktif yang terbuka.</p>
-                    <small>Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.</small>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- View 1: Active Open Positions Table -->
+        <div id="viewActivePositions">
+          <div class="table-responsive">
+            <table class="data-table" id="positionsTable">
+              <thead>
+                <tr>
+                  <th>Simbol & Arah</th>
+                  <th>Posisi Leader</th>
+                  <th>Entry Leader</th>
+                  <th>Posisi Akun Anda</th>
+                  <th>Entry Anda</th>
+                  <th>Rasio Akun</th>
+                  <th>Floating PnL</th>
+                  <th>Status Sinkron</th>
+                </tr>
+              </thead>
+              <tbody id="positionsTableBody">
+                <tr class="empty-row">
+                  <td colspan="8">
+                    <div class="empty-state">
+                      <i data-lucide="inbox" class="empty-icon"></i>
+                      <p>Leader saat ini belum memiliki posisi aktif yang terbuka.</p>
+                      <small>Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.</small>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- View 2: Closed Trades History Table -->
+        <div id="viewClosedTrades" style="display: none;">
+          <div class="history-summary-bar">
+            <div class="stat-chip">
+              <span class="stat-chip-label"><i data-lucide="check-circle-2"></i> Total Selesai</span>
+              <span class="stat-chip-val" id="histTotalTrades">0</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-chip-label"><i data-lucide="trending-up"></i> Win Rate</span>
+              <span class="stat-chip-val text-green" id="histWinRate">0.0%</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-chip-label"><i data-lucide="dollar-sign"></i> Akumulasi PnL</span>
+              <span class="stat-chip-val" id="histTotalPnl">$0.00 USDT</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-chip-label"><i data-lucide="bar-chart-2"></i> Menang / Kalah</span>
+              <span class="stat-chip-val" id="histWinLoss">0W / 0L</span>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table" id="closedTradesTable">
+              <thead>
+                <tr>
+                  <th>Waktu Selesai</th>
+                  <th>Simbol & Arah</th>
+                  <th>Aksi</th>
+                  <th>Volume</th>
+                  <th>Harga Beli</th>
+                  <th>Harga Jual</th>
+                  <th>Realized PnL</th>
+                  <th>ROI / PnL %</th>
+                  <th>Tipe Akun</th>
+                </tr>
+              </thead>
+              <tbody id="closedTradesTableBody">
+                <tr class="empty-row">
+                  <td colspan="9">
+                    <div class="empty-state">
+                      <i data-lucide="history" class="empty-icon"></i>
+                      <p>Belum ada riwayat transaksi yang ditutup.</p>
+                      <small>Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.</small>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

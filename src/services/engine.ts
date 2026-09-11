@@ -1,11 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 
 const CONFIG_PATH = path.resolve(__dirname, '../../config.json');
 const VIRTUAL_STATE_PATH = path.resolve(__dirname, '../../virtual_state.json');
+const TRADE_HISTORY_PATH = path.resolve(__dirname, '../../trade_history.json');
 
 export class CopyTradeEngine {
   private config: AppConfig;
@@ -19,12 +20,14 @@ export class CopyTradeEngine {
   private lastProcessedOrderTime: number = 0;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public virtualWalletBalance: number = 100;
+  private closedTrades: ClosedTrade[] = [];
   private wsBroadcaster: ((type: string, payload: any) => void) | null = null;
 
   constructor() {
     this.config = this.loadConfig();
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
     this.loadVirtualState();
+    this.loadTradeHistory();
     this.initBinance();
   }
 
@@ -58,6 +61,56 @@ export class CopyTradeEngine {
         }
       }
     } catch {}
+  }
+
+  private saveTradeHistory() {
+    try {
+      fs.writeFileSync(TRADE_HISTORY_PATH, JSON.stringify(this.closedTrades, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  private loadTradeHistory() {
+    try {
+      if (fs.existsSync(TRADE_HISTORY_PATH)) {
+        const raw = fs.readFileSync(TRADE_HISTORY_PATH, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          this.closedTrades = parsed;
+        }
+      }
+    } catch {}
+  }
+
+  getClosedTrades(): ClosedTrade[] {
+    return this.closedTrades;
+  }
+
+  clearClosedTrades() {
+    this.closedTrades = [];
+    this.saveTradeHistory();
+    this.log('INFO', '🧹 Riwayat trade selesai telah dibersihkan.');
+  }
+
+  recordClosedTrade(trade: Omit<ClosedTrade, 'id' | 'timestamp' | 'closedAt'>) {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const dateStr = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+    const fullTrade: ClosedTrade = {
+      ...trade,
+      id: Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
+      timestamp: now.getTime(),
+      closedAt: `${dateStr} ${timeStr}`,
+    };
+
+    this.closedTrades.unshift(fullTrade);
+    if (this.closedTrades.length > 250) {
+      this.closedTrades = this.closedTrades.slice(0, 250);
+    }
+    this.saveTradeHistory();
+
+    if (this.wsBroadcaster) {
+      this.wsBroadcaster('CLOSED_TRADE', fullTrade);
+    }
   }
 
   setBroadcaster(fn: (type: string, payload: any) => void) {
@@ -375,13 +428,16 @@ export class CopyTradeEngine {
 
                 const isFullClose = targetCloseQty <= 0 || targetCloseQty >= userCurrentQty || (userCurrentQty - targetCloseQty) < filter.minQty;
                 const actualCloseQty = isFullClose ? userCurrentQty : targetCloseQty;
+                const pnl = ord.positionSide === 'LONG'
+                  ? (ord.avgPrice - userPos.entryPrice) * actualCloseQty
+                  : (userPos.entryPrice - ord.avgPrice) * actualCloseQty;
+                const pnlPct = userPos.entryPrice > 0
+                  ? ((ord.avgPrice - userPos.entryPrice) / userPos.entryPrice) * (ord.positionSide === 'LONG' ? 1 : -1) * 100 * (userPos.leverage || 10)
+                  : 0;
 
                 if (isFullClose) {
                   this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup Penuh)`);
                   if (this.config.paperTrading) {
-                    const pnl = ord.positionSide === 'LONG'
-                      ? (ord.avgPrice - userPos.entryPrice) * actualCloseQty
-                      : (userPos.entryPrice - ord.avgPrice) * actualCloseQty;
                     this.virtualWalletBalance += pnl;
                     this.virtualPositions.delete(key);
                     this.saveVirtualState();
@@ -390,12 +446,21 @@ export class CopyTradeEngine {
                     await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
                     this.log('SUCCESS', `✅ Posisi ${ord.symbol} ${ord.positionSide} akun Anda berhasil ditutup penuh.`);
                   }
+
+                  this.recordClosedTrade({
+                    symbol: ord.symbol,
+                    positionSide: ord.positionSide,
+                    action: 'FULL_CLOSE',
+                    qty: actualCloseQty,
+                    entryPrice: userPos.entryPrice,
+                    closePrice: ord.avgPrice,
+                    realizedPnl: Number(pnl.toFixed(2)),
+                    pnlPct: Number(pnlPct.toFixed(2)),
+                    isPaper: this.config.paperTrading,
+                  });
                 } else {
                   this.log('INFO', `🎯 [Latest Records] Leader PARTIAL CLOSE ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup ${actualCloseQty})`);
                   if (this.config.paperTrading) {
-                    const pnl = ord.positionSide === 'LONG'
-                      ? (ord.avgPrice - userPos.entryPrice) * actualCloseQty
-                      : (userPos.entryPrice - ord.avgPrice) * actualCloseQty;
                     const remainingQty = userCurrentQty - actualCloseQty;
                     this.virtualWalletBalance += pnl;
                     userPos.positionAmt = ord.positionSide === 'LONG' ? remainingQty : -remainingQty;
@@ -407,6 +472,18 @@ export class CopyTradeEngine {
                     await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
                     this.log('SUCCESS', `✅ Partial close ${ord.symbol} (-${actualCloseQty}) berhasil dieksekusi.`);
                   }
+
+                  this.recordClosedTrade({
+                    symbol: ord.symbol,
+                    positionSide: ord.positionSide,
+                    action: 'PARTIAL_CLOSE',
+                    qty: actualCloseQty,
+                    entryPrice: userPos.entryPrice,
+                    closePrice: ord.avgPrice,
+                    realizedPnl: Number(pnl.toFixed(2)),
+                    pnlPct: Number(pnlPct.toFixed(2)),
+                    isPaper: this.config.paperTrading,
+                  });
                 }
               }
             }
@@ -464,20 +541,35 @@ export class CopyTradeEngine {
           if (lossPct >= this.config.emergencySlPct) {
             this.log('ERROR', `🚨 EMERGENCY STOP LOSS DIPICU! ${up.symbol} floating loss: -${lossPct.toFixed(2)}% (Batas: ${this.config.emergencySlPct}%). Menutup posisi darurat!`);
             const side: 'LONG' | 'SHORT' = up.positionAmt > 0 ? 'LONG' : 'SHORT';
+            const slQty = Math.abs(up.positionAmt);
+            const slPnl = up.unRealizedProfit;
+
             if (this.config.paperTrading) {
               const posKey = `${up.symbol}_${side}`;
-              this.virtualWalletBalance += up.unRealizedProfit;
+              this.virtualWalletBalance += slPnl;
               this.virtualPositions.delete(posKey);
               this.saveVirtualState();
-              this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi virtual ${up.symbol} ditutup via Emergency Stop Loss! PnL: -$${Math.abs(up.unRealizedProfit).toFixed(2)} USDT`);
+              this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi virtual ${up.symbol} ditutup via Emergency Stop Loss! PnL: -$${Math.abs(slPnl).toFixed(2)} USDT`);
             } else {
               try {
-                await binanceClient.closePosition(up.symbol, side, Math.abs(up.positionAmt));
+                await binanceClient.closePosition(up.symbol, side, slQty);
                 this.log('SUCCESS', `✅ Berhasil menutup darurat ${up.symbol}`);
               } catch (e: any) {
                 this.log('ERROR', `Gagal menutup darurat ${up.symbol}: ${e.message}`);
               }
             }
+
+            this.recordClosedTrade({
+              symbol: up.symbol,
+              positionSide: side,
+              action: 'EMERGENCY_SL',
+              qty: slQty,
+              entryPrice: up.entryPrice,
+              closePrice: up.markPrice || up.entryPrice,
+              realizedPnl: Number(slPnl.toFixed(2)),
+              pnlPct: Number((-lossPct).toFixed(2)),
+              isPaper: this.config.paperTrading,
+            });
           }
         }
       }
@@ -500,6 +592,7 @@ export class CopyTradeEngine {
         user: {
           balance: userBalanceInfo,
           positions: userPositions,
+          closedTrades: this.closedTrades,
         },
       });
     }
@@ -687,14 +780,18 @@ export class CopyTradeEngine {
 
     if (closeQty < filter.minQty) return;
 
+    const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
+    const pnl = existingUserPos.positionSide === 'LONG'
+      ? (markPrice - existingUserPos.entryPrice) * closeQty
+      : (existingUserPos.entryPrice - markPrice) * closeQty;
+    const pnlPct = existingUserPos.entryPrice > 0
+      ? ((markPrice - existingUserPos.entryPrice) / existingUserPos.entryPrice) * (existingUserPos.positionSide === 'LONG' ? 1 : -1) * 100 * (existingUserPos.leverage || 10)
+      : 0;
+
     if (this.config.paperTrading) {
       const posKey = `${leaderPos.symbol}_${existingUserPos.positionSide}`;
       const oldQty = Math.abs(existingUserPos.positionAmt);
       const newQty = Math.max(0, oldQty - closeQty);
-      const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
-      const pnl = existingUserPos.positionSide === 'LONG'
-        ? (markPrice - existingUserPos.entryPrice) * closeQty
-        : (existingUserPos.entryPrice - markPrice) * closeQty;
       this.virtualWalletBalance += pnl;
       if (newQty <= 0) {
         this.virtualPositions.delete(posKey);
@@ -704,49 +801,92 @@ export class CopyTradeEngine {
       }
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Partial Close: ${leaderPos.symbol} (-${closeQty}). PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
-      return;
+    } else {
+      try {
+        const side: 'LONG' | 'SHORT' = existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT';
+        this.log('INFO', `✂️ Menutup parsial ${leaderPos.symbol} (${(closeRatio * 100).toFixed(1)}%, Vol: ${closeQty})...`);
+        await binanceClient.closePosition(leaderPos.symbol, side, closeQty);
+        this.log('SUCCESS', `✅ Sukses partial close ${leaderPos.symbol} (${closeQty})`);
+      } catch (e: any) {
+        this.log('ERROR', `Gagal partial close ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
+      }
     }
 
-    try {
-      const side: 'LONG' | 'SHORT' = existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT';
-      this.log('INFO', `✂️ Menutup parsial ${leaderPos.symbol} (${(closeRatio * 100).toFixed(1)}%, Vol: ${closeQty})...`);
-      await binanceClient.closePosition(leaderPos.symbol, side, closeQty);
-      this.log('SUCCESS', `✅ Sukses partial close ${leaderPos.symbol} (${closeQty})`);
-    } catch (e: any) {
-      this.log('ERROR', `Gagal partial close ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
-    }
+    this.recordClosedTrade({
+      symbol: leaderPos.symbol,
+      positionSide: existingUserPos.positionSide as any,
+      action: 'PARTIAL_CLOSE',
+      qty: closeQty,
+      entryPrice: existingUserPos.entryPrice,
+      closePrice: markPrice,
+      realizedPnl: Number(pnl.toFixed(2)),
+      pnlPct: Number(pnlPct.toFixed(2)),
+      isPaper: this.config.paperTrading,
+    });
   }
 
   private async handleFullClose(leaderPos: LeadPosition, existingUserPos: UserPosition) {
     const qty = Math.abs(existingUserPos.positionAmt);
     const side: 'LONG' | 'SHORT' = existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT';
     const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
+    const pnl = side === 'LONG'
+      ? (markPrice - existingUserPos.entryPrice) * qty
+      : (existingUserPos.entryPrice - markPrice) * qty;
+    const pnlPct = existingUserPos.entryPrice > 0
+      ? ((markPrice - existingUserPos.entryPrice) / existingUserPos.entryPrice) * (side === 'LONG' ? 1 : -1) * 100 * (existingUserPos.leverage || 10)
+      : 0;
 
     if (this.config.paperTrading) {
       const posKey = `${existingUserPos.symbol}_${side}`;
-      const pnl = side === 'LONG'
-        ? (markPrice - existingUserPos.entryPrice) * qty
-        : (existingUserPos.entryPrice - markPrice) * qty;
       this.virtualWalletBalance += pnl;
       this.virtualPositions.delete(posKey);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Posisi ${existingUserPos.symbol} ${side} DITUTUP LENGKAP! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT. Saldo simulasi: $${this.virtualWalletBalance.toFixed(2)} USDT`);
-      return;
+    } else {
+      try {
+        this.log('INFO', `🚪 Mengirim order Market Close untuk ${existingUserPos.symbol} (Qty: ${qty})...`);
+        await binanceClient.closePosition(existingUserPos.symbol, side, qty);
+        this.log('SUCCESS', `✅ Posisi ${existingUserPos.symbol} ${side} BERHASIL DITUTUP SEMPURNA!`);
+      } catch (e: any) {
+        this.log('ERROR', `Gagal menutup posisi ${existingUserPos.symbol}: ${e.response?.data?.msg || e.message}`);
+      }
     }
 
-    try {
-      this.log('INFO', `🚪 Mengirim order Market Close untuk ${existingUserPos.symbol} (Qty: ${qty})...`);
-      await binanceClient.closePosition(existingUserPos.symbol, side, qty);
-      this.log('SUCCESS', `✅ Posisi ${existingUserPos.symbol} ${side} BERHASIL DITUTUP SEMPURNA!`);
-    } catch (e: any) {
-      this.log('ERROR', `Gagal menutup posisi ${existingUserPos.symbol}: ${e.response?.data?.msg || e.message}`);
-    }
+    this.recordClosedTrade({
+      symbol: existingUserPos.symbol,
+      positionSide: side,
+      action: 'FULL_CLOSE',
+      qty,
+      entryPrice: existingUserPos.entryPrice,
+      closePrice: markPrice,
+      realizedPnl: Number(pnl.toFixed(2)),
+      pnlPct: Number(pnlPct.toFixed(2)),
+      isPaper: this.config.paperTrading,
+    });
   }
 
   async panicCloseAll(): Promise<string> {
     this.log('WARN', '🚨 TOMBOL PANIC CLOSE DITEKAN! Menutup semua posisi copy-trade aktif...');
     if (this.config.paperTrading) {
       const count = this.virtualPositions.size;
+      for (const vp of this.virtualPositions.values()) {
+        const side: 'LONG' | 'SHORT' = vp.positionAmt > 0 ? 'LONG' : 'SHORT';
+        const qty = Math.abs(vp.positionAmt);
+        const pnl = vp.unRealizedProfit || 0;
+        const pnlPct = vp.entryPrice > 0 ? (pnl / ((qty * vp.entryPrice) / (vp.leverage || 10))) * 100 : 0;
+        this.virtualWalletBalance += pnl;
+        this.recordClosedTrade({
+          symbol: vp.symbol,
+          positionSide: side,
+          action: 'PANIC_CLOSE',
+          qty,
+          entryPrice: vp.entryPrice,
+          closePrice: vp.markPrice || vp.entryPrice,
+          realizedPnl: Number(pnl.toFixed(2)),
+          pnlPct: Number(pnlPct.toFixed(2)),
+          isPaper: true,
+        });
+      }
       this.virtualPositions.clear();
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Berhasil menutup ${count} posisi virtual secara darurat!`);
@@ -762,7 +902,19 @@ export class CopyTradeEngine {
       let count = 0;
       for (const p of positions) {
         const side: 'LONG' | 'SHORT' = p.positionAmt > 0 ? 'LONG' : 'SHORT';
-        await binanceClient.closePosition(p.symbol, side, Math.abs(p.positionAmt));
+        const qty = Math.abs(p.positionAmt);
+        await binanceClient.closePosition(p.symbol, side, qty);
+        this.recordClosedTrade({
+          symbol: p.symbol,
+          positionSide: side,
+          action: 'PANIC_CLOSE',
+          qty,
+          entryPrice: p.entryPrice,
+          closePrice: p.markPrice || p.entryPrice,
+          realizedPnl: Number((p.unRealizedProfit || 0).toFixed(2)),
+          pnlPct: 0,
+          isPaper: false,
+        });
         count++;
       }
 

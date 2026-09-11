@@ -75,7 +75,11 @@ wss.on('connection', (ws, req) => {
     payload: {
       status: engine.getStatus(),
       config: maskConfig(cfg),
-      user: { balance: initUserBalance, positions: initUserPositions },
+      user: {
+        balance: initUserBalance,
+        positions: initUserPositions,
+        closedTrades: engine.getClosedTrades(),
+      },
       logs: engine.getLogs(),
     }
   }));
@@ -304,6 +308,15 @@ app.post('/api/clear-logs', requireAuth, (req, res) => {
 app.post('/api/reset-demo', requireAuth, (req, res) => {
   engine.resetDemo();
   res.json({ success: true, message: 'Riwayat dan posisi demo berhasil di-reset.' });
+});
+
+app.get('/api/closed-trades', requireAuth, (req, res) => {
+  res.json({ success: true, trades: engine.getClosedTrades() });
+});
+
+app.post('/api/clear-closed-trades', requireAuth, (req, res) => {
+  engine.clearClosedTrades();
+  res.json({ success: true, message: 'Riwayat trade selesai telah dibersihkan.' });
 });
 
 // Fallback index.html
