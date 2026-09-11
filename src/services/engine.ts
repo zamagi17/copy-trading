@@ -361,22 +361,52 @@ export class CopyTradeEngine {
               };
               await this.handleNewPosition(mockPos, userBalance, userPositionsMap.get(`${ord.symbol}_${ord.positionSide}`));
             } else if (ord.action === 'CLOSE') {
-              this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice}`);
               const key = `${ord.symbol}_${ord.positionSide}`;
               const userPos = userPositionsMap.get(key);
               if (userPos && Math.abs(userPos.positionAmt) > 0) {
-                if (this.config.paperTrading) {
-                  const qty = Math.abs(userPos.positionAmt);
-                  const pnl = ord.positionSide === 'LONG'
-                    ? (ord.avgPrice - userPos.entryPrice) * qty
-                    : (userPos.entryPrice - ord.avgPrice) * qty;
-                  this.virtualWalletBalance += pnl;
-                  this.virtualPositions.delete(key);
-                  this.saveVirtualState();
-                  this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi ${ord.symbol} ${ord.positionSide} ditutup sinkron! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
+                const userCurrentQty = Math.abs(userPos.positionAmt);
+                const filter = await binanceClient.getSymbolFilter(ord.symbol);
+
+                // Hitung kuantitas tutup proporsional
+                const leaderEquity = this.lastLeaderEquity > 0 ? this.lastLeaderEquity : 50000;
+                const equityRatio = (userBalance / leaderEquity) * this.config.ratioMultiplier;
+                let targetCloseQty = ord.executedQty > 0 ? (ord.executedQty * equityRatio) : userCurrentQty;
+                targetCloseQty = binanceClient.roundQuantity(targetCloseQty, filter.stepSize);
+
+                const isFullClose = targetCloseQty <= 0 || targetCloseQty >= userCurrentQty || (userCurrentQty - targetCloseQty) < filter.minQty;
+                const actualCloseQty = isFullClose ? userCurrentQty : targetCloseQty;
+
+                if (isFullClose) {
+                  this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup Penuh)`);
+                  if (this.config.paperTrading) {
+                    const pnl = ord.positionSide === 'LONG'
+                      ? (ord.avgPrice - userPos.entryPrice) * actualCloseQty
+                      : (userPos.entryPrice - ord.avgPrice) * actualCloseQty;
+                    this.virtualWalletBalance += pnl;
+                    this.virtualPositions.delete(key);
+                    this.saveVirtualState();
+                    this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi ${ord.symbol} ${ord.positionSide} ditutup penuh sinkron! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
+                  } else {
+                    await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
+                    this.log('SUCCESS', `✅ Posisi ${ord.symbol} ${ord.positionSide} akun Anda berhasil ditutup penuh.`);
+                  }
                 } else {
-                  await binanceClient.closePosition(ord.symbol, ord.positionSide, Math.abs(userPos.positionAmt));
-                  this.log('SUCCESS', `✅ Posisi ${ord.symbol} ${ord.positionSide} akun Anda berhasil ditutup sinkron.`);
+                  this.log('INFO', `🎯 [Latest Records] Leader PARTIAL CLOSE ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup ${actualCloseQty})`);
+                  if (this.config.paperTrading) {
+                    const pnl = ord.positionSide === 'LONG'
+                      ? (ord.avgPrice - userPos.entryPrice) * actualCloseQty
+                      : (userPos.entryPrice - ord.avgPrice) * actualCloseQty;
+                    const remainingQty = userCurrentQty - actualCloseQty;
+                    this.virtualWalletBalance += pnl;
+                    userPos.positionAmt = ord.positionSide === 'LONG' ? remainingQty : -remainingQty;
+                    userPos.notional = remainingQty * ord.avgPrice;
+                    this.virtualPositions.set(key, userPos);
+                    this.saveVirtualState();
+                    this.log('SUCCESS', `🧪 [MODE SIMULASI] Partial close ${ord.symbol} selesai (-${actualCloseQty}). PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Sisa: ${remainingQty.toFixed(4)} koin)`);
+                  } else {
+                    await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
+                    this.log('SUCCESS', `✅ Partial close ${ord.symbol} (-${actualCloseQty}) berhasil dieksekusi.`);
+                  }
                 }
               }
             }
@@ -529,6 +559,21 @@ export class CopyTradeEngine {
     // JIKA MODE SIMULASI (PAPER TRADING) AKTIF: Eksekusi secara virtual tanpa API Key & tanpa modal riil
     if (this.config.paperTrading) {
       const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+
+      // JIKA POSISI SUDAH ADA (Averaging / Menambah Posisi):
+      if (existingUserPos && Math.abs(existingUserPos.positionAmt) > 0) {
+        const oldQty = Math.abs(existingUserPos.positionAmt);
+        const newQty = oldQty + targetQty;
+        const newEntry = (oldQty * existingUserPos.entryPrice + targetQty * markPrice) / newQty;
+        existingUserPos.positionAmt = leaderPos.positionSide === 'LONG' ? newQty : -newQty;
+        existingUserPos.entryPrice = newEntry;
+        existingUserPos.notional = newQty * markPrice;
+        this.virtualPositions.set(posKey, existingUserPos);
+        this.saveVirtualState();
+        this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${targetQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
+        return;
+      }
+
       const virtualPos: UserPosition = {
         symbol: leaderPos.symbol,
         positionSide: leaderPos.positionSide,

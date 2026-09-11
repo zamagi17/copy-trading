@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19"/>
+      <stop offset="100%" stop-color="#060910"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fcd34d"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <rect width="504" height="504" x="4" y="4" rx="124" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="8"/>
+
+  <!-- Glowing background ring -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="rgba(56,189,248,0.08)" stroke-width="32"/>
+
+  <!-- Upper Gold Curved Arrow (Send/Copy) -->
+  <path d="M 160 210 A 105 105 0 0 1 350 170" fill="none" stroke="url(#gold)" stroke-width="36" stroke-linecap="round" filter="url(#glow)"/>
+  <polygon points="330,125 385,175 325,215" fill="url(#gold)" filter="url(#glow)"/>
+
+  <!-- Lower Cyan Curved Arrow (Receive/Sync) -->
+  <path d="M 352 302 A 105 105 0 0 1 162 342" fill="none" stroke="url(#cyan)" stroke-width="36" stroke-linecap="round" filter="url(#glow)"/>
+  <polygon points="182,387 127,337 187,297" fill="url(#cyan)" filter="url(#glow)"/>
+
+  <!-- Center Core Node -->
+  <circle cx="256" cy="256" r="32" fill="#0b0f19" stroke="url(#gold)" stroke-width="10"/>
+  <circle cx="256" cy="256" r="14" fill="url(#cyan)"/>
+</svg>
