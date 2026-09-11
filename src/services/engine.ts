@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 
@@ -120,9 +120,13 @@ export class CopyTradeEngine {
       this.log('INFO', `🔄 Target Leader diperbarui ke ID: ${this.config.portfolioId}. Tracking posisi di-reset.`);
     }
 
-    // Jika virtual balance diubah dan belum ada posisi virtual terbuka, sesuaikan saldo virtual
-    if (newConfig.virtualBalanceUsdt !== undefined && this.virtualPositions.size === 0) {
-      this.virtualWalletBalance = newConfig.virtualBalanceUsdt;
+    // Jika virtual balance diubah di pengaturan, sesuaikan saldo virtual dan simpan ke disk
+    if (newConfig.virtualBalanceUsdt !== undefined && !isNaN(Number(newConfig.virtualBalanceUsdt))) {
+      const newBal = Number(newConfig.virtualBalanceUsdt);
+      if (newBal > 0) {
+        this.virtualWalletBalance = newBal;
+        this.saveVirtualState();
+      }
     }
 
     try {
@@ -264,10 +268,13 @@ export class CopyTradeEngine {
 
     // 2. Fetch saldo dan posisi akun pengguna (atau virtual jika mode simulasi)
     let userBalance = 0;
+    let userBalanceInfo: BalanceInfo;
     let userPositions: UserPosition[] = [];
 
     if (this.config.paperTrading) {
       userBalance = this.virtualWalletBalance;
+      let totalUnrealizedProfit = 0;
+      let usedMargin = 0;
       // Sinkronkan mark price & hitung floating PnL untuk posisi simulasi
       for (const [k, vp] of this.virtualPositions.entries()) {
         const lp = currentLeaderMap.get(k);
@@ -278,16 +285,38 @@ export class CopyTradeEngine {
             ? (vp.markPrice - vp.entryPrice) * qty
             : (vp.entryPrice - vp.markPrice) * qty;
         }
+        totalUnrealizedProfit += (vp.unRealizedProfit || 0);
+        usedMargin += ((Math.abs(vp.positionAmt) * (vp.entryPrice || 0)) / (vp.leverage || 10));
       }
       userPositions = Array.from(this.virtualPositions.values());
+      userBalanceInfo = {
+        totalWalletBalance: this.virtualWalletBalance,
+        totalUnrealizedProfit,
+        totalMarginBalance: this.virtualWalletBalance + totalUnrealizedProfit,
+        availableBalance: Math.max(0, this.virtualWalletBalance - usedMargin),
+      };
     } else if (binanceClient.isConfigured()) {
       try {
         const bal = await binanceClient.getAccountBalance();
         userBalance = bal.totalWalletBalance > 0 ? bal.totalWalletBalance : bal.availableBalance;
+        userBalanceInfo = bal;
         userPositions = await binanceClient.getOpenPositions();
       } catch (e: any) {
         this.log('WARN', `Gagal ambil saldo/posisi akun pengguna: ${e.message}`);
+        userBalanceInfo = {
+          totalWalletBalance: 0,
+          totalUnrealizedProfit: 0,
+          totalMarginBalance: 0,
+          availableBalance: 0,
+        };
       }
+    } else {
+      userBalanceInfo = {
+        totalWalletBalance: 0,
+        totalUnrealizedProfit: 0,
+        totalMarginBalance: 0,
+        availableBalance: 0,
+      };
     }
 
     const userPositionsMap = new Map<string, UserPosition>();
@@ -439,7 +468,7 @@ export class CopyTradeEngine {
           positions: currentLeaderPositions,
         },
         user: {
-          balance: userBalance,
+          balance: userBalanceInfo,
           positions: userPositions,
         },
       });

@@ -16,7 +16,13 @@ const wss = new WebSocketServer({ server });
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.resolve(__dirname, '../public')));
+app.use(express.static(path.resolve(__dirname, '../public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.js') || filePath.endsWith('.css') || filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  },
+}));
 
 // WebSocket handling with Authentication
 const clients = new Set<WebSocket>();
@@ -36,12 +42,40 @@ wss.on('connection', (ws, req) => {
 
   clients.add(ws);
 
+  const cfg = engine.getConfig();
+  let initUserBalance: BalanceInfo;
+  let initUserPositions: UserPosition[] = [];
+
+  if (cfg.paperTrading) {
+    let totalUnrealizedProfit = 0;
+    let usedMargin = 0;
+    for (const vp of engine.virtualPositions.values()) {
+      totalUnrealizedProfit += (vp.unRealizedProfit || 0);
+      usedMargin += ((Math.abs(vp.positionAmt) * (vp.entryPrice || 0)) / (vp.leverage || 10));
+    }
+    initUserBalance = {
+      totalWalletBalance: engine.virtualWalletBalance,
+      totalUnrealizedProfit,
+      totalMarginBalance: engine.virtualWalletBalance + totalUnrealizedProfit,
+      availableBalance: Math.max(0, engine.virtualWalletBalance - usedMargin),
+    };
+    initUserPositions = Array.from(engine.virtualPositions.values());
+  } else {
+    initUserBalance = {
+      totalWalletBalance: 0,
+      totalUnrealizedProfit: 0,
+      totalMarginBalance: 0,
+      availableBalance: 0,
+    };
+  }
+
   // Kirim data awal saat connect
   ws.send(JSON.stringify({
     type: 'INIT',
     payload: {
       status: engine.getStatus(),
-      config: maskConfig(engine.getConfig()),
+      config: maskConfig(cfg),
+      user: { balance: initUserBalance, positions: initUserPositions },
       logs: engine.getLogs(),
     }
   }));

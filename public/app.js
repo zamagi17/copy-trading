@@ -242,6 +242,9 @@ function connectWebSocket() {
         currentStatus = payload.status;
         updateEngineUI(payload.status);
         updateConfigSpecs(payload.config);
+        if (payload.user) {
+          updateUserAccountUI(payload.user.balance, payload.user.positions);
+        }
         if (payload.logs) {
           payload.logs.reverse().forEach((l) => appendLog(l.level, l.message, l.timestamp));
         }
@@ -418,12 +421,19 @@ function updateTickData(payload) {
 }
 
 function updateUserAccountUI(balance, positions) {
-  if (balance) {
-    userWalletBalance.innerHTML = `$${formatNumber(balance.totalWalletBalance || balance.availableBalance)} <span class="currency">USDT</span>`;
-    userAvailableBalance.innerText = `$${formatNumber(balance.availableBalance)}`;
+  if (typeof balance === 'number') {
+    userWalletBalance.innerHTML = `$${formatNumber(balance)} <span class="currency">USDT</span>`;
+    userAvailableBalance.innerText = `$${formatNumber(balance)}`;
+    userFloatingPnl.innerText = `$0.00`;
+    userFloatingPnl.className = 'metric-val text-muted';
+  } else if (balance) {
+    const total = balance.totalWalletBalance ?? balance.totalMarginBalance ?? balance.availableBalance ?? 0;
+    const avail = balance.availableBalance ?? total;
+    userWalletBalance.innerHTML = `$${formatNumber(total)} <span class="currency">USDT</span>`;
+    userAvailableBalance.innerText = `$${formatNumber(avail)}`;
     
     const pnl = balance.totalUnrealizedProfit || 0;
-    userFloatingPnl.innerText = `$${formatNumber(pnl)}`;
+    userFloatingPnl.innerText = `${pnl >= 0 ? '+' : ''}$${formatNumber(pnl)}`;
     userFloatingPnl.className = `metric-val ${pnl > 0 ? 'text-green' : pnl < 0 ? 'text-red' : 'text-muted'}`;
   }
 
