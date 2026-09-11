@@ -6,3 +6,11 @@ Dockerfile
 .dockerignore
 docker-compose.yml
 
+# Local deployment & secret files
+deploy.bat
+*.key
+*.pem
+virtual_state.json
+trade_history.json
+config.json.bak
+
