@@ -1,0 +1,26 @@
+{
+  "portfolioId": "5154344801714752768",
+  "copyTradeActive": true,
+  "paperTrading": true,
+  "virtualBalanceUsdt": 100,
+  "binanceApiKey": "",
+  "binanceSecretKey": "",
+  "isTestnet": false,
+  "mode": "RATIO_EQUITY",
+  "ratioMultiplier": 1,
+  "fixedAmountUsdt": 25,
+  "maxModalPerCoin": 100,
+  "maxSlippagePct": 0.5,
+  "syncLeverage": true,
+  "emergencySlPct": 80,
+  "pollingIntervalMs": 1500,
+  "proxy": {
+    "enabled": false,
+    "host": "",
+    "port": 823,
+    "username": "",
+    "password": ""
+  },
+  "adminPassword": "admin123",
+  "jwtSecret": "copytrade_secret_key_change_me_987"
+}

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binance Copy Trader - Standalone Engine</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Background Glow FX -->
+  <div class="glow-bg glow-1"></div>
+  <div class="glow-bg glow-2"></div>
+
+  <div class="app-container">
+    <!-- Navbar Header -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="logo-box">
+          <i data-lucide="repeat" class="icon-brand"></i>
+        </div>
+        <div>
+          <h1 class="brand-title">BINANCE COPY TRADER</h1>
+          <span class="brand-subtitle">Proportional Ratio & Residential Proxy Engine</span>
+        </div>
+      </div>
+
+      <div class="nav-controls">
+        <div class="engine-badge badge-simulation" id="simBadge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
+          <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>
+          <span id="simBadgeText">SIMULASI (FREE TRIAL)</span>
+        </div>
+
+        <div class="engine-badge" id="engineStatusBadge">
+          <span class="status-dot dot-idle" id="statusDot"></span>
+          <span id="statusText">STANDBY</span>
+        </div>
+
+        <button class="btn btn-success" id="btnToggleEngine" onclick="toggleEngine()">
+          <i data-lucide="play" class="btn-icon" id="toggleIcon"></i>
+          <span id="toggleBtnText">Mulai Copy Trade</span>
+        </button>
+
+        <button class="btn btn-danger" id="btnPanicClose" onclick="confirmPanicClose()">
+          <i data-lucide="alert-octagon" class="btn-icon"></i>
+          <span>Panic Close All</span>
+        </button>
+
+        <button class="btn btn-secondary" id="btnOpenSettings" onclick="openSettingsModal()">
+          <i data-lucide="settings" class="btn-icon"></i>
+          <span>Pengaturan</span>
+        </button>
+
+        <button class="btn btn-ghost" id="btnLogout" onclick="logout()" title="Kunci / Logout">
+          <i data-lucide="log-out" class="btn-icon"></i>
+          <span>Logout</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Top Statistics Grid -->
+    <section class="stats-grid">
+      <!-- Card 1: Target Leader Profile -->
+      <div class="glass-card leader-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <i data-lucide="user-check" class="card-icon text-yellow"></i>
+            <h3>Target Lead Trader</h3>
+          </div>
+          <span class="badge badge-yellow" id="leaderFollowersBadge">Followers: -- / --</span>
+        </div>
+
+        <div class="leader-profile-row">
+          <div class="avatar-box" id="leaderAvatar">LT</div>
+          <div class="leader-info">
+            <div class="leader-name" id="leaderName">Leader 5154344801714752768</div>
+            <div class="leader-id" id="leaderIdText">Portfolio ID: 5154344801714752768</div>
+          </div>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric">
+            <span class="metric-label">Modal/Equity Leader</span>
+            <span class="metric-val" id="leaderEquityVal">$0.00</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">ROI 7D</span>
+            <span class="metric-val text-green" id="leaderRoiVal">+0.00%</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Max Drawdown 7D</span>
+            <span class="metric-val text-red" id="leaderMddVal">0.00%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: User Account Overview -->
+      <div class="glass-card user-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <i data-lucide="wallet" class="card-icon text-cyan"></i>
+            <h3>Akun Binance Futures Anda</h3>
+          </div>
+          <span class="badge badge-cyan" id="accountModeBadge">LIVE FUTURES</span>
+        </div>
+
+        <div class="balance-showcase">
+          <div class="balance-label">Total Saldo Margin</div>
+          <div class="balance-amount" id="userWalletBalance">$0.00 <span class="currency">USDT</span></div>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric">
+            <span class="metric-label">Saldo Tersedia</span>
+            <span class="metric-val text-cyan" id="userAvailableBalance">$0.00</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Unrealized PnL</span>
+            <span class="metric-val text-muted" id="userFloatingPnl">$0.00</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Posisi Terbuka</span>
+            <span class="metric-val" id="userOpenPositionsCount">0 Posisi</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Engine Parameters & Proxy -->
+      <div class="glass-card engine-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <i data-lucide="cpu" class="card-icon text-purple"></i>
+            <h3>Status Engine & Proxy</h3>
+          </div>
+          <span class="badge badge-purple" id="proxyStatusBadge">Proxy: Nonaktif</span>
+        </div>
+
+        <div class="engine-specs">
+          <div class="spec-item">
+            <span class="spec-label"><i data-lucide="scale"></i> Mode Sizing:</span>
+            <span class="spec-value" id="specMode">RATIO_EQUITY</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label"><i data-lucide="shield"></i> Safety Cap:</span>
+            <span class="spec-value text-yellow" id="specSafetyCap">$50.00 USDT</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label"><i data-lucide="activity"></i> Slippage Guard:</span>
+            <span class="spec-value" id="specSlippage">0.50% Max</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label"><i data-lucide="zap"></i> Polling Jitter:</span>
+            <span class="spec-value" id="specPolling">~2.5 Detik</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace: Positions Table & Live Terminal -->
+    <main class="main-layout">
+      <!-- Left / Top: Active Positions Comparison -->
+      <section class="glass-card table-section">
+        <div class="section-bar">
+          <div class="section-title">
+            <i data-lucide="table-2" class="section-icon"></i>
+            <h2>Sinkronisasi Posisi Real-Time</h2>
+          </div>
+          <div class="table-actions">
+            <span class="pulse-indicator"><span class="pulse-ring"></span> Live Stream</span>
+            <button class="btn-sm btn-ghost" onclick="refreshData()" title="Segarkan Data">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="positionsTable">
+            <thead>
+              <tr>
+                <th>Simbol & Arah</th>
+                <th>Posisi Leader</th>
+                <th>Entry Leader</th>
+                <th>Posisi Akun Anda</th>
+                <th>Entry Anda</th>
+                <th>Rasio Akun</th>
+                <th>Floating PnL</th>
+                <th>Status Sinkron</th>
+              </tr>
+            </thead>
+            <tbody id="positionsTableBody">
+              <tr class="empty-row">
+                <td colspan="8">
+                  <div class="empty-state">
+                    <i data-lucide="inbox" class="empty-icon"></i>
+                    <p>Leader saat ini belum memiliki posisi aktif yang terbuka.</p>
+                    <small>Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.</small>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Right / Bottom: Live Matrix Terminal Logs -->
+      <section class="glass-card terminal-section">
+        <div class="section-bar">
+          <div class="section-title">
+            <i data-lucide="terminal" class="section-icon text-cyan"></i>
+            <h2>Live Event Terminal Log</h2>
+          </div>
+          <div class="terminal-actions">
+            <button class="btn-sm btn-ghost" onclick="clearLogs()">Bersihkan Log</button>
+          </div>
+        </div>
+
+        <div class="terminal-body" id="terminalLogBox">
+          <div class="log-line log-info">
+            <span class="log-time">[SYSTEM]</span>
+            <span class="log-msg">Binance Copy Trader Web Dashboard initialized. Siap memantau aktivitas leader.</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: Settings Configuration -->
+  <div class="modal-overlay" id="settingsModal" style="display: none;">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i data-lucide="sliders" class="modal-icon"></i>
+          <h2>Konfigurasi Copy Trading & Proxy</h2>
+        </div>
+        <button class="btn-close" onclick="closeSettingsModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Tab 0: Mode Simulasi (Paper Trading / Free Trial) -->
+        <fieldset class="form-group-fieldset" style="border-color: rgba(59, 130, 246, 0.5); background: rgba(59, 130, 246, 0.05);">
+          <legend style="color: #60a5fa;"><i data-lucide="flask-conical"></i> Mode Simulasi (Paper Trading - Uji Coba Bebas Risiko)</legend>
+          <div class="form-row">
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkPaperTrading" checked onchange="togglePaperTradingInputs()">
+                <span class="checkmark"></span>
+                <span style="font-weight: 600; color: #93c5fd;">Aktifkan Mode Simulasi (Uji Coba 100% GRATIS tanpa uang sungguhan & tanpa resiko)</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row" id="paperTradingInputsRow">
+            <div class="form-field">
+              <label for="inputVirtualBalance">Saldo Virtual Simulasi (USDT):</label>
+              <input type="number" id="inputVirtualBalance" step="10" min="10" value="100">
+              <small>Saldo virtual untuk menguji presisi perhitungan rasio lot dan profit/loss bot.</small>
+            </div>
+            <div class="form-field" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-sm btn-ghost" onclick="resetDemoData()" style="color: #f87171; border: 1px solid rgba(248,113,113,0.3);">
+                <i data-lucide="trash-2"></i> Reset & Hapus Riwayat Demo
+              </button>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab 1: Leader & Mode -->
+        <fieldset class="form-group-fieldset">
+          <legend><i data-lucide="target"></i> Target Lead Trader & Sizing</legend>
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputPortfolioId">Portfolio ID Leader Binance:</label>
+              <div class="input-with-button">
+                <input type="text" id="inputPortfolioId" placeholder="Misal: 5154344801714752768" value="5154344801714752768">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="previewLeader()">Preview</button>
+              </div>
+              <small>ID di URL Binance: binance.com/en/copy-trading/lead-details/<b>[ID]</b></small>
+            </div>
+
+            <div class="form-field">
+              <label for="selectMode">Mode Perhitungan Rasio:</label>
+              <select id="selectMode">
+                <option value="RATIO_EQUITY">Rasio Modal (Proporsional Modal Anda / Modal Leader)</option>
+                <option value="FIXED_AMOUNT">Nominal Tetap per Koin (USDT)</option>
+                <option value="FIXED_RATIO">Persentase Tetap dari Saldo (5% per Koin)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputRatioMultiplier">Pengali Rasio (Multiplier):</label>
+              <input type="number" id="inputRatioMultiplier" step="0.1" min="0.1" max="10.0" value="1.0">
+              <small>Default: 1.0 (100% proporsional). Set 0.5 untuk separuh risiko.</small>
+            </div>
+
+            <div class="form-field">
+              <label for="inputFixedAmount">Nominal Tetap per Posisi (USDT):</label>
+              <input type="number" id="inputFixedAmount" step="1" min="6" value="25">
+              <small>Hanya berlaku jika Mode = Nominal Tetap.</small>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label for="selectPollingInterval">Kecepatan Pantau (Polling Interval):</label>
+              <select id="selectPollingInterval">
+                <option value="1000">⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)</option>
+                <option value="1500">⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)</option>
+                <option value="2000">⚖️ 2.0 Detik (Seimbang & Hemat Kuota Proxy)</option>
+                <option value="2500">🛡️ 2.5 Detik (Standar)</option>
+                <option value="3000">🛡️ 3.0 Detik (Santai / Swing Trading)</option>
+              </select>
+              <small>Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).</small>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab 2: Safety & Risk Limits -->
+        <fieldset class="form-group-fieldset">
+          <legend><i data-lucide="shield-check"></i> Safety Guard & Manajemen Risiko</legend>
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputMaxModalPerCoin">Safety Cap (Maksimal Margin per Koin USDT):</label>
+              <input type="number" id="inputMaxModalPerCoin" step="5" min="10" value="50">
+              <small>Mencegah modal habis jika leader melakukan averaging terus-menerus.</small>
+            </div>
+
+            <div class="form-field">
+              <label for="inputMaxSlippage">Toleransi Slippage Maksimal (%):</label>
+              <input type="number" id="inputMaxSlippage" step="0.1" min="0.1" max="5.0" value="0.5">
+              <small>Batalkan order jika harga sudah lari > toleransi dari entry leader.</small>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputEmergencySl">Emergency Stop Loss Akun (%):</label>
+              <input type="number" id="inputEmergencySl" step="1" min="3" max="50" value="10">
+              <small>Auto cut-loss independen jika floating minus akun mencapai X%.</small>
+            </div>
+
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkSyncLeverage" checked>
+                <span class="checkmark"></span>
+                <span>Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)</span>
+              </label>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab 3: Residential Proxy -->
+        <fieldset class="form-group-fieldset">
+          <legend><i data-lucide="globe"></i> Residential Proxy (Anti Blokir Cloudflare)</legend>
+          <div class="form-row">
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkProxyEnabled" onchange="toggleProxyInputs()">
+                <span class="checkmark"></span>
+                <span>Aktifkan Residential Proxy (Rekomendasi: DataImpulse / Webshare)</span>
+              </label>
+            </div>
+            <div class="form-field">
+              <button type="button" class="btn btn-sm btn-info" id="btnTestProxy" onclick="testProxy()">
+                <i data-lucide="radio"></i> Uji Koneksi Proxy
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row" id="proxyInputsRow">
+            <div class="form-field">
+              <label for="inputProxyHost">Proxy Host / IP:</label>
+              <input type="text" id="inputProxyHost" placeholder="Misal: geo.dataimpulse.com">
+            </div>
+            <div class="form-field">
+              <label for="inputProxyPort">Port:</label>
+              <input type="number" id="inputProxyPort" placeholder="823">
+            </div>
+            <div class="form-field">
+              <label for="inputProxyUser">Username:</label>
+              <input type="text" id="inputProxyUser" placeholder="Username proxy">
+            </div>
+            <div class="form-field">
+              <label for="inputProxyPass">Password:</label>
+              <input type="password" id="inputProxyPass" placeholder="Password proxy">
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab 4: Binance API Keys -->
+        <fieldset class="form-group-fieldset">
+          <legend><i data-lucide="key"></i> Kredensial Binance Futures API Anda</legend>
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputApiKey">Binance API Key:</label>
+              <input type="text" id="inputApiKey" placeholder="Masukkan API Key Binance Futures Anda">
+            </div>
+            <div class="form-field">
+              <label for="inputSecretKey">Binance Secret Key:</label>
+              <input type="password" id="inputSecretKey" placeholder="Masukkan Secret Key Binance Futures Anda">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkIsTestnet">
+                <span class="checkmark"></span>
+                <span>Gunakan Binance Testnet (Mode Simulasi Demo)</span>
+              </label>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab 5: Keamanan & Password Admin -->
+        <fieldset class="form-group-fieldset">
+          <legend><i data-lucide="lock"></i> Keamanan & Password Admin</legend>
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputCurrentPass">Password Admin Saat Ini:</label>
+              <input type="password" id="inputCurrentPass" placeholder="Password saat ini">
+            </div>
+            <div class="form-field">
+              <label for="inputNewPass">Password Baru:</label>
+              <input type="password" id="inputNewPass" placeholder="Minimal 6 karakter">
+            </div>
+            <div class="form-field" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="changeAdminPassword()">
+                <i data-lucide="check"></i> Ganti Password
+              </button>
+            </div>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
+        <button class="btn btn-primary" onclick="saveSettings()">Simpan Pengaturan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login Security Overlay -->
+  <div class="login-overlay" id="loginOverlay" style="display: none;">
+    <div class="login-box glass-card">
+      <div class="login-header">
+        <div class="lock-icon-box">
+          <i data-lucide="shield-alert" class="lock-icon"></i>
+        </div>
+        <h2>SISTEM TERKUNCI</h2>
+        <p>Masukkan Master Password Admin untuk mengakses bot Binance Copy Trader</p>
+      </div>
+      <form onsubmit="handleLoginSubmit(event)">
+        <div class="form-field">
+          <label for="loginPassword">Master Password Admin:</label>
+          <input type="password" id="loginPassword" placeholder="Masukkan password..." autocomplete="current-password" required>
+        </div>
+        <div id="loginErrorMsg" class="login-error" style="display: none;"></div>
+        <button type="submit" class="btn btn-primary btn-block" id="btnLoginSubmit">
+          <i data-lucide="unlock"></i> Buka Dashboard
+        </button>
+      </form>
+      <div class="login-hint">
+        <small>Password default: <code>admin123</code> (dapat diubah di menu Pengaturan).</small>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>
