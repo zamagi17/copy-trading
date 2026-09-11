@@ -5,6 +5,7 @@ import { binanceClient } from './binance';
 import { scraper } from './scraper';
 
 const CONFIG_PATH = path.resolve(__dirname, '../../config.json');
+const VIRTUAL_STATE_PATH = path.resolve(__dirname, '../../virtual_state.json');
 
 export class CopyTradeEngine {
   private config: AppConfig;
@@ -23,7 +24,40 @@ export class CopyTradeEngine {
   constructor() {
     this.config = this.loadConfig();
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
+    this.loadVirtualState();
     this.initBinance();
+  }
+
+  private saveVirtualState() {
+    try {
+      const data = {
+        virtualWalletBalance: this.virtualWalletBalance,
+        virtualPositions: Array.from(this.virtualPositions.entries()),
+        lastProcessedOrderTime: this.lastProcessedOrderTime,
+      };
+      fs.writeFileSync(VIRTUAL_STATE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    } catch {}
+  }
+
+  private loadVirtualState() {
+    try {
+      if (fs.existsSync(VIRTUAL_STATE_PATH)) {
+        const raw = fs.readFileSync(VIRTUAL_STATE_PATH, 'utf-8');
+        const data = JSON.parse(raw);
+        if (typeof data.virtualWalletBalance === 'number') {
+          this.virtualWalletBalance = data.virtualWalletBalance;
+        }
+        if (Array.isArray(data.virtualPositions)) {
+          this.virtualPositions = new Map(data.virtualPositions);
+        }
+        if (typeof data.lastProcessedOrderTime === 'number' && data.lastProcessedOrderTime > 0) {
+          this.lastProcessedOrderTime = data.lastProcessedOrderTime;
+        }
+        if (this.virtualPositions.size > 0) {
+          this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual tersimpan dari disk (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
+        }
+      }
+    } catch {}
   }
 
   setBroadcaster(fn: (type: string, payload: any) => void) {
@@ -139,6 +173,11 @@ export class CopyTradeEngine {
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
     this.logs = [];
     this.lastProcessedOrderTime = 0;
+    try {
+      if (fs.existsSync(VIRTUAL_STATE_PATH)) {
+        fs.unlinkSync(VIRTUAL_STATE_PATH);
+      }
+    } catch {}
     this.log('INFO', '🧹 Riwayat demo & posisi virtual telah di-reset bersih.');
   }
 
@@ -304,6 +343,7 @@ export class CopyTradeEngine {
                     : (userPos.entryPrice - ord.avgPrice) * qty;
                   this.virtualWalletBalance += pnl;
                   this.virtualPositions.delete(key);
+                  this.saveVirtualState();
                   this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi ${ord.symbol} ${ord.positionSide} ditutup sinkron! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
                 } else {
                   await binanceClient.closePosition(ord.symbol, ord.positionSide, Math.abs(userPos.positionAmt));
@@ -369,6 +409,7 @@ export class CopyTradeEngine {
               const posKey = `${up.symbol}_${side}`;
               this.virtualWalletBalance += up.unRealizedProfit;
               this.virtualPositions.delete(posKey);
+              this.saveVirtualState();
               this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi virtual ${up.symbol} ditutup via Emergency Stop Loss! PnL: -$${Math.abs(up.unRealizedProfit).toFixed(2)} USDT`);
             } else {
               try {
@@ -471,6 +512,7 @@ export class CopyTradeEngine {
         notional: targetQty * markPrice,
       };
       this.virtualPositions.set(posKey, virtualPos);
+      this.saveVirtualState();
       const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} @ $${markPrice} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${leaderPos.leverage || 10}x)`);
       return;
@@ -536,6 +578,7 @@ export class CopyTradeEngine {
       existingUserPos.entryPrice = newEntry;
       existingUserPos.notional = newQty * markPrice;
       this.virtualPositions.set(posKey, existingUserPos);
+      this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${addQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
       return;
     }
@@ -585,6 +628,7 @@ export class CopyTradeEngine {
         existingUserPos.positionAmt = existingUserPos.positionSide === 'LONG' ? newQty : -newQty;
         this.virtualPositions.set(posKey, existingUserPos);
       }
+      this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Partial Close: ${leaderPos.symbol} (-${closeQty}). PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
       return;
     }
@@ -611,6 +655,7 @@ export class CopyTradeEngine {
         : (existingUserPos.entryPrice - markPrice) * qty;
       this.virtualWalletBalance += pnl;
       this.virtualPositions.delete(posKey);
+      this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Posisi ${existingUserPos.symbol} ${side} DITUTUP LENGKAP! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT. Saldo simulasi: $${this.virtualWalletBalance.toFixed(2)} USDT`);
       return;
     }
@@ -629,6 +674,7 @@ export class CopyTradeEngine {
     if (this.config.paperTrading) {
       const count = this.virtualPositions.size;
       this.virtualPositions.clear();
+      this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Berhasil menutup ${count} posisi virtual secara darurat!`);
       return `Berhasil menutup ${count} posisi virtual.`;
     }

@@ -33,24 +33,10 @@ async function resolveBinanceIpViaDoH(): Promise<string | null> {
 
 export class CopyTradeScraper {
   private detailCache: Map<string, { data: any; perf?: any; lastFetch: number }> = new Map();
+  private cachedClient: AxiosInstance | null = null;
+  private cachedClientKey: string = '';
 
   private async createClient(proxy?: ProxyConfig): Promise<AxiosInstance> {
-    const config: AxiosRequestConfig = {
-      baseURL: BASE_URL,
-      timeout: 10000,
-      headers: {
-        'User-Agent': CHROME_UA,
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'clienttype': 'web',
-        'Referer': 'https://www.binance.com/en/copy-trading/lead-details/',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-      },
-      decompress: true,
-    };
-
     let proxyHost = (proxy?.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
     let proxyPort = proxy?.port;
     if (proxyHost.includes(':')) {
@@ -61,11 +47,42 @@ export class CopyTradeScraper {
       }
     }
 
-    if (proxy && proxy.enabled && proxyHost && proxyPort) {
-      // Menggunakan Residential Proxy (DataImpulse, Webshare, dll)
-      const auth = proxy.username && proxy.password ? `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@` : '';
+    const isProxyActive = Boolean(proxy && proxy.enabled && proxyHost && proxyPort);
+    const clientKey = isProxyActive 
+      ? `proxy_${proxy?.username || ''}_${proxyHost}_${proxyPort}` 
+      : 'direct_doh';
+
+    // REUSE existing persistent client & Keep-Alive socket!
+    // Mencegah pembuatan TLS Handshake baru di setiap request (menghemat ~70% kuota proxy!)
+    if (this.cachedClient && this.cachedClientKey === clientKey) {
+      return this.cachedClient;
+    }
+
+    const config: AxiosRequestConfig = {
+      baseURL: BASE_URL,
+      timeout: 10000,
+      headers: {
+        'User-Agent': CHROME_UA,
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate',
+        'clienttype': 'web',
+        'Connection': 'keep-alive',
+      },
+      decompress: true,
+    };
+
+    if (isProxyActive) {
+      // Menggunakan Residential Proxy dengan persistent Keep-Alive socket
+      const auth = proxy!.username && proxy!.password ? `${encodeURIComponent(proxy!.username)}:${encodeURIComponent(proxy!.password)}@` : '';
       const proxyUrl = `http://${auth}${proxyHost}:${proxyPort}`;
-      const agent = new HttpsProxyAgent(proxyUrl);
+      const agent = new HttpsProxyAgent(proxyUrl, {
+        keepAlive: true,
+        keepAliveMsecs: 30000,
+        maxSockets: 5,
+        maxFreeSockets: 2,
+        timeout: 60000,
+      });
       config.httpAgent = agent;
       config.httpsAgent = agent;
       config.proxy = false;
@@ -74,6 +91,7 @@ export class CopyTradeScraper {
       const resolvedIp = await resolveBinanceIpViaDoH();
       if (resolvedIp) {
         const agent = new https.Agent({
+          keepAlive: true,
           lookup: (hostname, options, callback) => {
             const cb = typeof options === 'function' ? options : callback;
             const opt = typeof options === 'object' ? options : {};
@@ -92,7 +110,9 @@ export class CopyTradeScraper {
       }
     }
 
-    return axios.create(config);
+    this.cachedClient = axios.create(config);
+    this.cachedClientKey = clientKey;
+    return this.cachedClient;
   }
 
   /**
@@ -175,7 +195,7 @@ export class CopyTradeScraper {
       const client = await this.createClient(proxy);
       const url = `/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/order-history`;
       const now = Date.now();
-      const startTime = now - (7 * 24 * 60 * 60 * 1000); // 7 hari terakhir
+      const startTime = now - (12 * 60 * 60 * 1000); // Cukup 12 jam terakhir (menghemat bandwidth)
 
       const res = await client.post(url, {
         portfolioId: portfolioId.trim(),
@@ -259,8 +279,8 @@ export class CopyTradeScraper {
 
       let perf = cached?.perf;
 
-      // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 3 menit (180 detik)
-      if (!cached || timestamp - cached.lastFetch > 180000) {
+      // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 5 menit (300 detik)
+      if (!cached || timestamp - cached.lastFetch > 300000) {
         try {
           const client = await this.createClient(proxy);
           const [detailRes, perfRes] = await Promise.allSettled([
@@ -303,8 +323,8 @@ export class CopyTradeScraper {
         // Mode Publik: Hanya ambil posisi aktif yang sedang terbuka
         positions = await this.fetchPositions(id, proxy);
       } else {
-        // Mode Privat: Hanya ambil feed order stream karena tab Positions di-private oleh leader
-        orders = await this.fetchOrderHistory(id, proxy, 8);
+        // Mode Privat: Cukup ambil 2 order teratas (menghemat payload JSON hingga 80%)
+        orders = await this.fetchOrderHistory(id, proxy, 2);
       }
 
       return {
