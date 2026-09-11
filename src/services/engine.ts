@@ -74,7 +74,23 @@ export class CopyTradeEngine {
   }
 
   saveConfig(newConfig: Partial<AppConfig>): AppConfig {
+    const portfolioChanged = newConfig.portfolioId && newConfig.portfolioId !== this.config.portfolioId;
+
     this.config = { ...this.config, ...newConfig };
+
+    // Jika target leader diganti, bersihkan tracking posisi lama agar tidak memicu deteksi posisi palsu
+    if (portfolioChanged) {
+      this.lastLeaderPositions.clear();
+      this.lastLeaderEquity = 0;
+      this.lastProcessedOrderTime = 0;
+      this.log('INFO', `🔄 Target Leader diperbarui ke ID: ${this.config.portfolioId}. Tracking posisi di-reset.`);
+    }
+
+    // Jika virtual balance diubah dan belum ada posisi virtual terbuka, sesuaikan saldo virtual
+    if (newConfig.virtualBalanceUsdt !== undefined && this.virtualPositions.size === 0) {
+      this.virtualWalletBalance = newConfig.virtualBalanceUsdt;
+    }
+
     try {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(this.config, null, 2), 'utf-8');
       this.initBinance();
@@ -349,11 +365,18 @@ export class CopyTradeEngine {
           if (lossPct >= this.config.emergencySlPct) {
             this.log('ERROR', `🚨 EMERGENCY STOP LOSS DIPICU! ${up.symbol} floating loss: -${lossPct.toFixed(2)}% (Batas: ${this.config.emergencySlPct}%). Menutup posisi darurat!`);
             const side: 'LONG' | 'SHORT' = up.positionAmt > 0 ? 'LONG' : 'SHORT';
-            try {
-              await binanceClient.closePosition(up.symbol, side, Math.abs(up.positionAmt));
-              this.log('SUCCESS', `✅ Berhasil menutup darurat ${up.symbol}`);
-            } catch (e: any) {
-              this.log('ERROR', `Gagal menutup darurat ${up.symbol}: ${e.message}`);
+            if (this.config.paperTrading) {
+              const posKey = `${up.symbol}_${side}`;
+              this.virtualWalletBalance += up.unRealizedProfit;
+              this.virtualPositions.delete(posKey);
+              this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi virtual ${up.symbol} ditutup via Emergency Stop Loss! PnL: -$${Math.abs(up.unRealizedProfit).toFixed(2)} USDT`);
+            } else {
+              try {
+                await binanceClient.closePosition(up.symbol, side, Math.abs(up.positionAmt));
+                this.log('SUCCESS', `✅ Berhasil menutup darurat ${up.symbol}`);
+              } catch (e: any) {
+                this.log('ERROR', `Gagal menutup darurat ${up.symbol}: ${e.message}`);
+              }
             }
           }
         }

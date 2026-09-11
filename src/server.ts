@@ -63,7 +63,10 @@ function broadcast(type: string, payload: any) {
 engine.setBroadcaster(broadcast);
 
 function maskConfig(cfg: any) {
-  const copy = { ...cfg };
+  const copy = {
+    ...cfg,
+    proxy: cfg.proxy ? { ...cfg.proxy } : undefined,
+  };
   if (copy.binanceSecretKey) {
     copy.binanceSecretKey = copy.binanceSecretKey.substring(0, 4) + '****************' + copy.binanceSecretKey.slice(-4);
   }
@@ -130,7 +133,7 @@ app.post('/api/auth/change-password', requireAuth, (req, res) => {
   }
 
   if (currentPassword !== (config.adminPassword || 'admin123')) {
-    res.status(401).json({ success: false, message: 'Password lama salah!' });
+    res.status(400).json({ success: false, message: 'Password lama salah!' });
     return;
   }
 
@@ -223,7 +226,11 @@ app.post('/api/engine/stop', requireAuth, (req, res) => {
 
 app.post('/api/test-proxy', requireAuth, async (req, res) => {
   try {
-    const proxy = req.body.proxy || engine.getConfig().proxy;
+    const current = engine.getConfig();
+    const proxy = req.body.proxy ? { ...req.body.proxy } : (current.proxy ? { ...current.proxy } : undefined);
+    if (proxy && proxy.password && proxy.password.includes('****')) {
+      proxy.password = current.proxy?.password || '';
+    }
     const result = await scraper.testProxy(proxy);
     res.json(result);
   } catch (e: any) {
@@ -233,8 +240,12 @@ app.post('/api/test-proxy', requireAuth, async (req, res) => {
 
 app.post('/api/fetch-leader', requireAuth, async (req, res) => {
   try {
-    const portfolioId = req.body.portfolioId || engine.getConfig().portfolioId;
-    const proxy = req.body.proxy || engine.getConfig().proxy;
+    const current = engine.getConfig();
+    const portfolioId = req.body.portfolioId || current.portfolioId;
+    const proxy = req.body.proxy ? { ...req.body.proxy } : (current.proxy ? { ...current.proxy } : undefined);
+    if (proxy && proxy.password && proxy.password.includes('****')) {
+      proxy.password = current.proxy?.password || '';
+    }
     const result = await scraper.fetchPortfolioDetail(portfolioId, proxy);
     res.json(result);
   } catch (e: any) {

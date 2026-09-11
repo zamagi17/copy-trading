@@ -42,17 +42,29 @@ export class CopyTradeScraper {
         'User-Agent': CHROME_UA,
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
         'clienttype': 'web',
         'Referer': 'https://www.binance.com/en/copy-trading/lead-details/',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
       },
+      decompress: true,
     };
 
-    if (proxy && proxy.enabled && proxy.host && proxy.port) {
+    let proxyHost = (proxy?.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    let proxyPort = proxy?.port;
+    if (proxyHost.includes(':')) {
+      const parts = proxyHost.split(':');
+      proxyHost = parts[0];
+      if (!proxyPort && parts[1]) {
+        proxyPort = parseInt(parts[1]) || null;
+      }
+    }
+
+    if (proxy && proxy.enabled && proxyHost && proxyPort) {
       // Menggunakan Residential Proxy (DataImpulse, Webshare, dll)
       const auth = proxy.username && proxy.password ? `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@` : '';
-      const proxyUrl = `http://${auth}${proxy.host}:${proxy.port}`;
+      const proxyUrl = `http://${auth}${proxyHost}:${proxyPort}`;
       const agent = new HttpsProxyAgent(proxyUrl);
       config.httpAgent = agent;
       config.httpsAgent = agent;
@@ -247,8 +259,8 @@ export class CopyTradeScraper {
 
       let perf = cached?.perf;
 
-      // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 45 detik
-      if (!cached || timestamp - cached.lastFetch > 45000) {
+      // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 3 menit (180 detik)
+      if (!cached || timestamp - cached.lastFetch > 180000) {
         try {
           const client = await this.createClient(proxy);
           const [detailRes, perfRes] = await Promise.allSettled([
@@ -282,14 +294,18 @@ export class CopyTradeScraper {
       const maxFollowerCount = Number(data?.maxCopyCount ?? data?.maxFollowerCount ?? 1000);
       const positionShow = data?.positionShow !== false; // false jika di-private oleh leader
 
-      // Ambil posisi aktif jika public
+      // Ambil posisi aktif jika public, atau ambil Latest Records HANYA jika mode privat
+      // Tidak mengambil keduanya sekaligus agar kuota proxy hemat hingga 50%!
       let positions: LeadPosition[] = [];
-      if (positionShow) {
-        positions = await this.fetchPositions(id, proxy);
-      }
+      let orders: LeadOrderRecord[] = [];
 
-      // Ambil Latest Records (cukup 8 order teratas untuk hemat kuota proxy secara masif)
-      const orders = await this.fetchOrderHistory(id, proxy, 8);
+      if (positionShow) {
+        // Mode Publik: Hanya ambil posisi aktif yang sedang terbuka
+        positions = await this.fetchPositions(id, proxy);
+      } else {
+        // Mode Privat: Hanya ambil feed order stream karena tab Positions di-private oleh leader
+        orders = await this.fetchOrderHistory(id, proxy, 8);
+      }
 
       return {
         portfolioId: id,
@@ -330,15 +346,52 @@ export class CopyTradeScraper {
   /**
    * Menguji koneksi proxy ke server Binance
    */
-  async testProxy(proxy: ProxyConfig): Promise<{ success: boolean; message: string; latencyMs: number }> {
+  async testProxy(proxy?: ProxyConfig): Promise<{ success: boolean; message: string; latencyMs: number }> {
     const start = Date.now();
+    let host = (proxy?.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    let port = proxy?.port;
+    if (host.includes(':')) {
+      const parts = host.split(':');
+      host = parts[0];
+      if (!port && parts[1]) {
+        port = parseInt(parts[1]) || null;
+      }
+    }
+
+    if (!proxy || !host || !port) {
+      return {
+        success: false,
+        message: 'Host dan Port proxy wajib diisi untuk melakukan pengujian!',
+        latencyMs: 0,
+      };
+    }
+
     try {
-      const client = await this.createClient(proxy);
-      const res = await client.get('/bapi/futures/v1/public/future/common/time');
+      const cleanProxy: ProxyConfig = {
+        ...proxy,
+        enabled: true,
+        host,
+        port,
+      };
+      const client = await this.createClient(cleanProxy);
+      await client.get('/bapi/futures/v1/public/future/common/time');
       const latencyMs = Date.now() - start;
-      return { success: true, message: 'Koneksi ke Binance berhasil!', latencyMs };
+      return { success: true, message: 'Koneksi ke Binance melalui Proxy berhasil!', latencyMs };
     } catch (err: any) {
-      return { success: false, message: err.message || 'Koneksi gagal', latencyMs: Date.now() - start };
+      const latencyMs = Date.now() - start;
+      let msg = err.message || 'Koneksi gagal';
+      if (err.response?.status === 407 || err.message?.includes('407')) {
+        msg = 'Autentikasi Proxy Gagal (HTTP 407). Username atau Password proxy salah.';
+      } else if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
+        msg = 'Koneksi ke proxy ditolak (Connection Refused). Periksa Host dan Port proxy Anda.';
+      } else if (err.code === 'ETIMEDOUT' || err.message?.includes('timeout')) {
+        msg = 'Koneksi ke proxy timeout (>10 detik). Server proxy lambat atau tidak merespons.';
+      } else if (err.code === 'ENOTFOUND' || err.message?.includes('ENOTFOUND')) {
+        msg = 'Host proxy tidak ditemukan (DNS lookup failed). Periksa ejaan Host proxy.';
+      } else if (err.response?.status === 403 || err.message?.includes('403')) {
+        msg = 'Akses ditolak oleh Cloudflare / Binance (HTTP 403). Coba gunakan IP / negara residential proxy lain.';
+      }
+      return { success: false, message: msg, latencyMs };
     }
   }
 }

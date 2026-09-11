@@ -304,16 +304,61 @@ function updateEngineUI(status) {
     toggleBtnText.innerText = 'Mulai Copy Trade';
     toggleIcon.setAttribute('data-lucide', 'play');
   }
-  lucide.createIcons();
+  lucide.createIcons({ root: btnToggleEngine });
 }
 
 function updateConfigSpecs(cfg) {
   if (!cfg) return;
-  specMode.innerText = cfg.mode || 'RATIO_EQUITY';
-  specSafetyCap.innerText = `$${Number(cfg.maxModalPerCoin || 50).toFixed(2)} USDT`;
-  specSlippage.innerText = `${Number(cfg.maxSlippagePct || 0.5).toFixed(2)}% Max`;
 
+  // 1. Target Leader ID & Name in Card 1
+  if (cfg.portfolioId) {
+    if (leaderIdText) leaderIdText.innerText = `Portfolio ID: ${cfg.portfolioId}`;
+    if (leaderName && (!leaderName.innerText || leaderName.innerText.startsWith('Leader '))) {
+      leaderName.innerText = `Leader ${cfg.portfolioId}`;
+    }
+  }
+
+  // 2. Mode Sizing Display in Card 3
+  if (specMode) {
+    if (cfg.mode === 'FIXED_AMOUNT') {
+      specMode.innerText = `Tetap ($${Number(cfg.fixedAmountUsdt || 25).toFixed(0)} USDT)`;
+    } else if (cfg.mode === 'FIXED_RATIO') {
+      specMode.innerText = `Rasio Saldo (5%)`;
+    } else {
+      specMode.innerText = `Rasio Modal (${Number(cfg.ratioMultiplier || 1.0).toFixed(1)}x)`;
+    }
+  }
+
+  // 3. Safety Cap & Slippage Guard
+  if (specSafetyCap) specSafetyCap.innerText = `$${Number(cfg.maxModalPerCoin || 50).toFixed(2)} USDT`;
+  if (specSlippage) specSlippage.innerText = `${Number(cfg.maxSlippagePct || 0.5).toFixed(2)}% Max`;
+
+  // 4. Polling Jitter Interval
+  const specPolling = document.getElementById('specPolling');
+  if (specPolling) {
+    specPolling.innerText = `~${((cfg.pollingIntervalMs || 1500) / 1000).toFixed(1)} Detik`;
+  }
+
+  // 5. Emergency Stop Loss
+  const specEmergencySl = document.getElementById('specEmergencySl');
+  if (specEmergencySl) {
+    specEmergencySl.innerText = `${Number(cfg.emergencySlPct || 10).toFixed(0)}% Cut Loss`;
+  }
+
+  // 6. Leverage Synchronization
+  const specLeverageSync = document.getElementById('specLeverageSync');
+  if (specLeverageSync) {
+    specLeverageSync.innerText = cfg.syncLeverage !== false ? 'Otomatis' : 'Manual';
+  }
+
+  // 7. Simulation / Live Futures Badges
   const isSim = cfg.paperTrading !== false;
+  const accountModeBadge = document.getElementById('accountModeBadge');
+  if (accountModeBadge) {
+    accountModeBadge.innerText = isSim ? 'SIMULASI DEMO' : (cfg.isTestnet ? 'BINANCE TESTNET' : 'LIVE FUTURES');
+    accountModeBadge.className = `badge ${isSim ? 'badge-purple' : 'badge-cyan'}`;
+  }
+
   if (simBadge && simBadgeText) {
     if (isSim) {
       simBadge.style.background = 'rgba(59, 130, 246, 0.15)';
@@ -324,10 +369,11 @@ function updateConfigSpecs(cfg) {
       simBadge.style.background = 'rgba(34, 197, 94, 0.15)';
       simBadge.style.borderColor = 'rgba(34, 197, 94, 0.4)';
       simBadge.style.color = '#22c55e';
-      simBadgeText.innerText = 'LIVE BINANCE FUTURES';
+      simBadgeText.innerText = cfg.isTestnet ? 'BINANCE TESTNET' : 'LIVE BINANCE FUTURES';
     }
   }
 
+  // 8. Proxy Status Badge
   if (cfg.proxy && cfg.proxy.enabled) {
     proxyStatusBadge.innerText = `Proxy: Aktif (${cfg.proxy.host || 'OK'})`;
     proxyStatusBadge.className = 'badge badge-green';
@@ -401,7 +447,7 @@ function renderPositionsTable(leaderPositions, userPositions, orders = [], posit
         </td>
       </tr>
     `;
-    lucide.createIcons();
+    lucide.createIcons({ root: positionsTableBody });
     return;
   }
 
@@ -449,7 +495,7 @@ function renderPositionsTable(leaderPositions, userPositions, orders = [], posit
   }
 
   positionsTableBody.innerHTML = html;
-  lucide.createIcons();
+  lucide.createIcons({ root: positionsTableBody });
 }
 
 function appendLog(level, message, timestamp) {
@@ -461,6 +507,10 @@ function appendLog(level, message, timestamp) {
     <span class="log-msg">${escapeHtml(message)}</span>
   `;
   terminalLogBox.appendChild(line);
+  // Batasi history maksimal 150 baris agar DOM tetap ringan dan scroll lancar
+  while (terminalLogBox.children.length > 150) {
+    terminalLogBox.removeChild(terminalLogBox.firstChild);
+  }
   terminalLogBox.scrollTop = terminalLogBox.scrollHeight;
 }
 
@@ -598,6 +648,7 @@ async function saveSettings() {
       updateConfigSpecs(currentConfig);
       closeSettingsModal();
       appendLog('SUCCESS', 'Pengaturan berhasil disimpan!');
+      refreshData();
     } else {
       alert(`Gagal menyimpan pengaturan: ${data.message}`);
     }
@@ -641,6 +692,13 @@ async function previewLeader() {
 }
 
 async function testProxy() {
+  const host = inputProxyHost.value.trim();
+  const port = parseInt(inputProxyPort.value) || null;
+  if (!host || !port) {
+    alert('Harap masukkan Host dan Port proxy terlebih dahulu sebelum menguji!');
+    return;
+  }
+
   const btn = document.getElementById('btnTestProxy');
   btn.disabled = true;
   btn.innerText = 'Menguji...';
@@ -651,8 +709,8 @@ async function testProxy() {
       body: JSON.stringify({
         proxy: {
           enabled: true,
-          host: inputProxyHost.value.trim(),
-          port: parseInt(inputProxyPort.value) || null,
+          host,
+          port,
           username: inputProxyUser.value.trim(),
           password: inputProxyPass.value.trim(),
         },
