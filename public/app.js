@@ -431,9 +431,12 @@ function updateUserAccountUI(balance, positions) {
   userOpenPositionsCount.innerText = `${count} Posisi`;
 }
 
-function renderPositionsTable(leaderPositions, userPositions, orders = [], positionShow = true) {
-  if (!leaderPositions || leaderPositions.length === 0) {
-    const isPrivate = positionShow === false;
+function renderPositionsTable(leaderPositions = [], userPositions = [], orders = [], positionShow = true) {
+  const isPrivate = positionShow === false;
+  const leaderList = Array.isArray(leaderPositions) ? leaderPositions : [];
+  const userList = Array.isArray(userPositions) ? userPositions : [];
+
+  if (leaderList.length === 0 && userList.length === 0) {
     positionsTableBody.innerHTML = `
       <tr class="empty-row">
         <td colspan="8">
@@ -451,42 +454,68 @@ function renderPositionsTable(leaderPositions, userPositions, orders = [], posit
     return;
   }
 
-  const userMap = new Map();
-  if (Array.isArray(userPositions)) {
-    for (const up of userPositions) {
-      userMap.set(`${up.symbol}_${up.positionSide}`, up);
-    }
+  const leaderMap = new Map();
+  for (const lp of leaderList) {
+    leaderMap.set(`${lp.symbol}_${lp.positionSide}`, lp);
   }
 
+  const userMap = new Map();
+  for (const up of userList) {
+    userMap.set(`${up.symbol}_${up.positionSide}`, up);
+  }
+
+  // Gabungkan semua key unik (dari posisi leader dan posisi akun pengguna)
+  const allKeys = new Set([...leaderMap.keys(), ...userMap.keys()]);
   let html = '';
-  for (const lp of leaderPositions) {
-    const key = `${lp.symbol}_${lp.positionSide}`;
+
+  for (const key of allKeys) {
+    const lp = leaderMap.get(key);
     const up = userMap.get(key);
-    const sideBadge = lp.positionSide === 'LONG' 
+
+    const symbol = lp ? lp.symbol : up?.symbol || '';
+    const side = lp ? lp.positionSide : up?.positionSide || 'LONG';
+    const leverage = lp?.leverage || up?.leverage || 10;
+
+    const sideBadge = side === 'LONG' 
       ? '<span class="badge badge-green">LONG</span>' 
       : '<span class="badge badge-red">SHORT</span>';
 
-    const leaderPnlColor = lp.unrealizedProfit >= 0 ? 'text-green' : 'text-red';
+    const leaderPnlColor = lp && lp.unrealizedProfit >= 0 ? 'text-green' : 'text-red';
     const userPnlColor = up && up.unRealizedProfit >= 0 ? 'text-green' : 'text-red';
 
-    const syncBadge = up 
-      ? '<span class="badge badge-cyan">TERKONEKSI</span>' 
-      : '<span class="badge badge-yellow">MENUNGGU SINKRON</span>';
+    let syncBadge = '';
+    if (lp && up) {
+      syncBadge = '<span class="badge badge-cyan">TERKONEKSI</span>';
+    } else if (up && !lp) {
+      syncBadge = isPrivate 
+        ? '<span class="badge badge-cyan">AKTIF (STREAM)</span>' 
+        : '<span class="badge badge-yellow">MENUNGGU CLOSE</span>';
+    } else {
+      syncBadge = '<span class="badge badge-yellow">MENUNGGU SINKRON</span>';
+    }
 
-    const ratioDisplay = up && lp.amount > 0 
+    const ratioDisplay = (up && lp && lp.amount > 0) 
       ? `${((Math.abs(up.positionAmt) / lp.amount) * 100).toFixed(2)}%` 
-      : '--';
+      : (up && isPrivate ? 'Stream' : '--');
+
+    const leaderVolDisplay = lp 
+      ? `${formatNumber(lp.amount)} ${symbol.replace('USDT', '')}` 
+      : (isPrivate ? '<span class="text-dim">Privat</span>' : '--');
+
+    const leaderEntryDisplay = lp 
+      ? `$${formatPrice(lp.entryPrice)}` 
+      : (isPrivate && up ? `$${formatPrice(up.entryPrice)}` : '--');
 
     html += `
       <tr>
-        <td><b>${lp.symbol}</b> ${sideBadge} <span class="badge badge-purple">${lp.leverage}x</span></td>
-        <td>${formatNumber(lp.amount)} ${lp.symbol.replace('USDT', '')}</td>
-        <td>$${formatPrice(lp.entryPrice)}</td>
-        <td>${up ? `${formatNumber(Math.abs(up.positionAmt))} ${lp.symbol.replace('USDT', '')}` : '<span class="text-muted">Belum ada</span>'}</td>
+        <td><b>${symbol}</b> ${sideBadge} <span class="badge badge-purple">${leverage}x</span></td>
+        <td>${leaderVolDisplay}</td>
+        <td>${leaderEntryDisplay}</td>
+        <td>${up ? `${formatNumber(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : '<span class="text-muted">Belum ada</span>'}</td>
         <td>${up ? `$${formatPrice(up.entryPrice)}` : '--'}</td>
         <td>${ratioDisplay}</td>
         <td>
-          <span class="${leaderPnlColor}">L: $${formatNumber(lp.unrealizedProfit)}</span><br/>
+          ${lp ? `<span class="${leaderPnlColor}">L: $${formatNumber(lp.unrealizedProfit)}</span><br/>` : ''}
           <span class="${userPnlColor}">U: ${up ? `$${formatNumber(up.unRealizedProfit)}` : '--'}</span>
         </td>
         <td>${syncBadge}</td>
