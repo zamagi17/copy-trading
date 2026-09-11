@@ -2,7 +2,7 @@
   "portfolioId": "5154344801714752768",
   "copyTradeActive": true,
   "paperTrading": true,
-  "virtualBalanceUsdt": 100,
+  "virtualBalanceUsdt": 1000,
   "binanceApiKey": "",
   "binanceSecretKey": "",
   "isTestnet": false,
