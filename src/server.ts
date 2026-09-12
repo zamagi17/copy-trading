@@ -40,6 +40,11 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
+  (ws as any).isAlive = true;
+  ws.on('pong', () => {
+    (ws as any).isAlive = true;
+  });
+
   clients.add(ws);
 
   const cfg = engine.getConfig();
@@ -87,6 +92,22 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     clients.delete(ws);
   });
+});
+
+// Periodic ping to keep connections alive and prevent 20-minute idle timeouts
+const pingInterval = setInterval(() => {
+  wss.clients.forEach((ws: any) => {
+    if (ws.isAlive === false) {
+      clients.delete(ws);
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(pingInterval);
 });
 
 function broadcast(type: string, payload: any) {
@@ -269,7 +290,7 @@ app.post('/api/test-proxy', requireAuth, async (req, res) => {
     if (proxy && proxy.password && proxy.password.includes('****')) {
       proxy.password = current.proxy?.password || '';
     }
-    const result = await scraper.testProxy(proxy);
+    const result = await scraper.testProxy(proxy, current.portfolioId);
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });

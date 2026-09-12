@@ -179,8 +179,8 @@ export class CopyTradeScraper {
       }
 
       return positions;
-    } catch {
-      return [];
+    } catch (err: any) {
+      throw err;
     }
   }
 
@@ -244,8 +244,8 @@ export class CopyTradeScraper {
       }
 
       return orders;
-    } catch {
-      return [];
+    } catch (err: any) {
+      throw err;
     }
   }
 
@@ -345,6 +345,19 @@ export class CopyTradeScraper {
         isSuccess: true,
       };
     } catch (err: any) {
+      let errorMsg = err.message || 'Gagal mengambil data leader';
+      if (err.response?.status === 403 || err.message?.includes('403')) {
+        errorMsg = 'IP_BLOCKED_403: Akses DITOLAK oleh Cloudflare / Binance (HTTP 403 Forbidden). IP Proxy Anda terdeteksi atau terblokir.';
+      } else if (err.response?.status === 407 || err.message?.includes('407')) {
+        errorMsg = 'PROXY_AUTH_407: Autentikasi Proxy Gagal atau Kuota Habis (HTTP 407). Periksa saldo/kuota proxy Anda.';
+      } else if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
+        errorMsg = 'PROXY_REFUSED: Koneksi ke server proxy ditolak (Connection Refused). Periksa Host dan Port proxy.';
+      } else if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        errorMsg = 'PROXY_TIMEOUT: Koneksi ke proxy timeout (>10 detik). Server proxy lambat atau tidak merespons.';
+      } else if (err.code === 'ENOTFOUND' || err.message?.includes('ENOTFOUND')) {
+        errorMsg = 'PROXY_DNS_FAILED: Host proxy tidak ditemukan (DNS lookup failed).';
+      }
+
       return {
         portfolioId,
         nickname: `Leader ${portfolioId}`,
@@ -356,17 +369,18 @@ export class CopyTradeScraper {
         maxFollowerCount: 1000,
         positionShow: false,
         positions: [],
+        orders: [],
         lastFetchTime: timestamp,
         isSuccess: false,
-        errorMessage: err.message,
+        errorMessage: errorMsg,
       };
     }
   }
 
   /**
-   * Menguji koneksi proxy ke server Binance
+   * Menguji koneksi proxy ke server Binance Copy Trading
    */
-  async testProxy(proxy?: ProxyConfig): Promise<{ success: boolean; message: string; latencyMs: number }> {
+  async testProxy(proxy?: ProxyConfig, portfolioId?: string): Promise<{ success: boolean; message: string; latencyMs: number }> {
     const start = Date.now();
     let host = (proxy?.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
     let port = proxy?.port;
@@ -394,14 +408,18 @@ export class CopyTradeScraper {
         port,
       };
       const client = await this.createClient(cleanProxy);
-      await client.get('/bapi/futures/v1/public/future/common/time');
+      const targetId = (portfolioId || '5154344801714752768').trim();
+      const res = await client.get(`/bapi/futures/v1/friendly/future/copy-trade/lead-data/positions?portfolioId=${targetId}`);
       const latencyMs = Date.now() - start;
-      return { success: true, message: 'Koneksi ke Binance melalui Proxy berhasil!', latencyMs };
+      if (res.data?.code && res.data.code !== '000000') {
+        return { success: false, message: `Proxy terhubung, namun Binance merespons kode: ${res.data?.code}`, latencyMs };
+      }
+      return { success: true, message: 'Koneksi ke Binance Copy Trading via Proxy 100% Berhasil!', latencyMs };
     } catch (err: any) {
       const latencyMs = Date.now() - start;
       let msg = err.message || 'Koneksi gagal';
       if (err.response?.status === 407 || err.message?.includes('407')) {
-        msg = 'Autentikasi Proxy Gagal (HTTP 407). Username atau Password proxy salah.';
+        msg = 'Autentikasi Proxy Gagal (HTTP 407). Username atau Password proxy salah, atau kuota habis.';
       } else if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
         msg = 'Koneksi ke proxy ditolak (Connection Refused). Periksa Host dan Port proxy Anda.';
       } else if (err.code === 'ETIMEDOUT' || err.message?.includes('timeout')) {
@@ -409,7 +427,9 @@ export class CopyTradeScraper {
       } else if (err.code === 'ENOTFOUND' || err.message?.includes('ENOTFOUND')) {
         msg = 'Host proxy tidak ditemukan (DNS lookup failed). Periksa ejaan Host proxy.';
       } else if (err.response?.status === 403 || err.message?.includes('403')) {
-        msg = 'Akses ditolak oleh Cloudflare / Binance (HTTP 403). Coba gunakan IP / negara residential proxy lain.';
+        msg = 'Akses DITOLAK oleh Cloudflare / Binance (HTTP 403 Forbidden). IP Proxy Anda terdeteksi/terblokir, silakan coba IP atau lokasi proxy lain.';
+      } else if (err.response?.status === 404) {
+        msg = 'Endpoint Binance tidak ditemukan (HTTP 404).';
       }
       return { success: false, message: msg, latencyMs };
     }

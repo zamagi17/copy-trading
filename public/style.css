@@ -175,10 +175,72 @@ body {
   box-shadow: 0 0 10px var(--accent-green);
   animation: pulse-dot 1.5s infinite;
 }
+.dot-error {
+  background: var(--accent-red);
+  box-shadow: 0 0 12px var(--accent-red);
+  animation: pulse-dot 0.8s infinite;
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.6; transform: scale(1.2); }
+}
+
+/* Language Toggle Pill */
+.lang-toggle-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(30, 41, 59, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.lang-toggle-box:hover {
+  background: rgba(51, 65, 85, 0.9);
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.25);
+  transform: translateY(-1px);
+}
+
+.lang-toggle-box:active {
+  transform: translateY(0);
+}
+
+.lang-icon {
+  width: 15px;
+  height: 15px;
+  color: #94a3b8;
+  transition: color 0.2s ease;
+}
+
+.lang-toggle-box:hover .lang-icon {
+  color: #38bdf8;
+}
+
+.lang-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  transition: all 0.2s ease;
+}
+
+.lang-badge.active {
+  color: #38bdf8;
+  font-weight: 800;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+}
+
+.lang-divider {
+  font-size: 0.75rem;
+  color: #475569;
+  font-weight: 400;
 }
 
 /* Buttons */

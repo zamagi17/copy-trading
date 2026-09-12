@@ -37,11 +37,19 @@
         </div>
         <div>
           <h1 class="brand-title">BINANCE COPY TRADER</h1>
-          <span class="brand-subtitle">Proportional Ratio & Residential Proxy Engine</span>
+          <span class="brand-subtitle" data-i18n="brand_subtitle">Proportional Ratio & Residential Proxy Engine</span>
         </div>
       </div>
 
       <div class="nav-controls">
+        <!-- Language Toggle -->
+        <div class="lang-toggle-box" id="langToggleBox" onclick="toggleLanguage()" title="Ganti Bahasa / Switch Language" role="button" tabindex="0">
+          <i data-lucide="languages" class="lang-icon"></i>
+          <span class="lang-badge active" id="langBadgeId">ID</span>
+          <span class="lang-divider">|</span>
+          <span class="lang-badge" id="langBadgeEn">EN</span>
+        </div>
+
         <div class="engine-badge badge-simulation" id="simBadge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
           <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>
           <span id="simBadgeText">SIMULASI (FREE TRIAL)</span>
@@ -59,17 +67,17 @@
 
         <button class="btn btn-danger" id="btnPanicClose" onclick="confirmPanicClose()">
           <i data-lucide="alert-octagon" class="btn-icon"></i>
-          <span>Panic Close All</span>
+          <span data-i18n="btn_panic_close">Panic Close All</span>
         </button>
 
         <button class="btn btn-secondary" id="btnOpenSettings" onclick="openSettingsModal()">
           <i data-lucide="settings" class="btn-icon"></i>
-          <span>Pengaturan</span>
+          <span data-i18n="btn_settings">Pengaturan</span>
         </button>
 
-        <button class="btn btn-ghost" id="btnLogout" onclick="logout()" title="Kunci / Logout">
+        <button class="btn btn-ghost" id="btnLogout" onclick="logout()" title="Kunci / Logout" data-i18n-title="btn_logout_title">
           <i data-lucide="log-out" class="btn-icon"></i>
-          <span>Logout</span>
+          <span data-i18n="btn_logout">Logout</span>
         </button>
       </div>
     </header>
@@ -81,7 +89,7 @@
         <div class="card-header">
           <div class="card-title-group">
             <i data-lucide="user-check" class="card-icon text-yellow"></i>
-            <h3>Target Lead Trader</h3>
+            <h3 data-i18n="leader_card_title">Target Lead Trader</h3>
           </div>
           <span class="badge badge-yellow" id="leaderFollowersBadge">Followers: -- / --</span>
         </div>
@@ -96,15 +104,15 @@
 
         <div class="metrics-row">
           <div class="metric">
-            <span class="metric-label">Modal/Equity Leader</span>
+            <span class="metric-label" data-i18n="leader_equity_label">Modal/Equity Leader</span>
             <span class="metric-val" id="leaderEquityVal">$0.00</span>
           </div>
           <div class="metric">
-            <span class="metric-label">ROI 7D</span>
+            <span class="metric-label" data-i18n="leader_roi_label">ROI 7D</span>
             <span class="metric-val text-green" id="leaderRoiVal">+0.00%</span>
           </div>
           <div class="metric">
-            <span class="metric-label">Max Drawdown 7D</span>
+            <span class="metric-label" data-i18n="leader_mdd_label">Max Drawdown 7D</span>
             <span class="metric-val text-red" id="leaderMddVal">0.00%</span>
           </div>
         </div>
@@ -115,27 +123,27 @@
         <div class="card-header">
           <div class="card-title-group">
             <i data-lucide="wallet" class="card-icon text-cyan"></i>
-            <h3>Akun Binance Futures Anda</h3>
+            <h3 data-i18n="user_card_title">Akun Binance Futures Anda</h3>
           </div>
           <span class="badge badge-purple" id="accountModeBadge">SIMULASI DEMO</span>
         </div>
 
         <div class="balance-showcase">
-          <div class="balance-label">Total Saldo Margin</div>
+          <div class="balance-label" data-i18n="user_balance_label">Total Saldo Margin</div>
           <div class="balance-amount" id="userWalletBalance">$0.00 <span class="currency">USDT</span></div>
         </div>
 
         <div class="metrics-row">
           <div class="metric">
-            <span class="metric-label">Saldo Tersedia</span>
+            <span class="metric-label" data-i18n="user_available_label">Saldo Tersedia</span>
             <span class="metric-val text-cyan" id="userAvailableBalance">$0.00</span>
           </div>
           <div class="metric">
-            <span class="metric-label">Unrealized PnL</span>
+            <span class="metric-label" data-i18n="user_unrealized_label">Unrealized PnL</span>
             <span class="metric-val text-muted" id="userFloatingPnl">$0.00</span>
           </div>
           <div class="metric">
-            <span class="metric-label">Posisi Terbuka</span>
+            <span class="metric-label" data-i18n="user_positions_label">Posisi Terbuka</span>
             <span class="metric-val" id="userOpenPositionsCount">0 Posisi</span>
           </div>
         </div>
@@ -146,34 +154,34 @@
         <div class="card-header">
           <div class="card-title-group">
             <i data-lucide="cpu" class="card-icon text-purple"></i>
-            <h3>Status Engine & Proxy</h3>
+            <h3 data-i18n="engine_card_title">Status Engine & Proxy</h3>
           </div>
           <span class="badge badge-purple" id="proxyStatusBadge">Proxy: Nonaktif</span>
         </div>
 
         <div class="engine-specs">
           <div class="spec-item">
-            <span class="spec-label"><i data-lucide="scale"></i> Sizing Mode:</span>
+            <span class="spec-label"><i data-lucide="scale"></i> <span data-i18n="spec_mode_label">Sizing Mode:</span></span>
             <span class="spec-value" id="specMode">RATIO_EQUITY</span>
           </div>
           <div class="spec-item">
-            <span class="spec-label"><i data-lucide="shield"></i> Safety Cap:</span>
+            <span class="spec-label"><i data-lucide="shield"></i> <span data-i18n="spec_safety_cap_label">Safety Cap:</span></span>
             <span class="spec-value text-yellow" id="specSafetyCap">$50.00 USDT</span>
           </div>
           <div class="spec-item">
-            <span class="spec-label"><i data-lucide="activity"></i> Slippage Guard:</span>
+            <span class="spec-label"><i data-lucide="activity"></i> <span data-i18n="spec_slippage_label">Slippage Guard:</span></span>
             <span class="spec-value" id="specSlippage">0.50% Max</span>
           </div>
           <div class="spec-item">
-            <span class="spec-label"><i data-lucide="zap"></i> Polling Jitter:</span>
+            <span class="spec-label"><i data-lucide="zap"></i> <span data-i18n="spec_polling_label">Polling Jitter:</span></span>
             <span class="spec-value" id="specPolling">~1.5 Detik</span>
           </div>
           <div class="spec-item">
-            <span class="spec-label"><i data-lucide="shield-alert"></i> Emergency SL:</span>
+            <span class="spec-label"><i data-lucide="shield-alert"></i> <span data-i18n="spec_emergency_sl_label">Emergency SL:</span></span>
             <span class="spec-value text-red" id="specEmergencySl">10% Cut Loss</span>
           </div>
           <div class="spec-item">
-            <span class="spec-label"><i data-lucide="layers"></i> Sync Leverage:</span>
+            <span class="spec-label"><i data-lucide="layers"></i> <span data-i18n="spec_leverage_label">Sync Leverage:</span></span>
             <span class="spec-value text-cyan" id="specLeverageSync">Otomatis (Cross)</span>
           </div>
         </div>
@@ -187,15 +195,15 @@
         <div class="section-bar">
           <div class="table-tabs">
             <button class="tab-btn active" id="tabBtnActive" onclick="switchTableTab('active')">
-              <i data-lucide="layers"></i> Posisi Terbuka <span class="tab-badge" id="activeCountBadge">0</span>
+              <i data-lucide="layers"></i> <span data-i18n="tab_active_positions">Posisi Terbuka</span> <span class="tab-badge" id="activeCountBadge">0</span>
             </button>
             <button class="tab-btn" id="tabBtnClosed" onclick="switchTableTab('closed')">
-              <i data-lucide="history"></i> Riwayat Trade Selesai <span class="tab-badge" id="closedCountBadge">0</span>
+              <i data-lucide="history"></i> <span data-i18n="tab_closed_trades">Riwayat Trade Selesai</span> <span class="tab-badge" id="closedCountBadge">0</span>
             </button>
           </div>
           <div class="table-actions">
-            <span class="pulse-indicator" id="liveIndicator"><span class="pulse-ring"></span> Live</span>
-            <button class="btn-sm btn-ghost" id="btnTableAction" onclick="handleTableAction()" title="Segarkan Data">
+            <span class="pulse-indicator" id="liveIndicator"><span class="pulse-ring"></span> <span data-i18n="live_indicator">Live</span></span>
+            <button class="btn-sm btn-ghost" id="btnTableAction" onclick="handleTableAction()" title="Segarkan Data" data-i18n-title="refresh_tooltip">
               <i data-lucide="refresh-cw" id="iconTableAction"></i>
             </button>
           </div>
@@ -207,14 +215,14 @@
             <table class="data-table" id="positionsTable">
               <thead>
                 <tr>
-                  <th>Simbol & Arah</th>
-                  <th>Posisi Leader</th>
-                  <th>Entry Leader</th>
-                  <th>Posisi Akun Anda</th>
-                  <th>Entry Anda</th>
-                  <th>Rasio Akun</th>
-                  <th>Floating PnL</th>
-                  <th>Status Sinkron</th>
+                  <th data-i18n="th_symbol_side">Simbol & Arah</th>
+                  <th data-i18n="th_leader_pos">Posisi Leader</th>
+                  <th data-i18n="th_leader_entry">Entry Leader</th>
+                  <th data-i18n="th_user_pos">Posisi Akun Anda</th>
+                  <th data-i18n="th_user_entry">Entry Anda</th>
+                  <th data-i18n="th_ratio">Rasio Akun</th>
+                  <th data-i18n="th_floating_pnl">Floating PnL</th>
+                  <th data-i18n="th_sync_status">Status Sinkron</th>
                 </tr>
               </thead>
               <tbody id="positionsTableBody">
@@ -222,8 +230,8 @@
                   <td colspan="8">
                     <div class="empty-state">
                       <i data-lucide="inbox" class="empty-icon"></i>
-                      <p>Leader saat ini belum memiliki posisi aktif yang terbuka.</p>
-                      <small>Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.</small>
+                      <p data-i18n="empty_open_title">Leader saat ini belum memiliki posisi aktif yang terbuka.</p>
+                      <small data-i18n="empty_open_desc">Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.</small>
                     </div>
                   </td>
                 </tr>
@@ -236,19 +244,19 @@
         <div id="viewClosedTrades" style="display: none;">
           <div class="history-summary-bar">
             <div class="stat-chip">
-              <span class="stat-chip-label"><i data-lucide="check-circle-2"></i> Total Selesai</span>
+              <span class="stat-chip-label"><i data-lucide="check-circle-2"></i> <span data-i18n="hist_total_closed">Total Selesai</span></span>
               <span class="stat-chip-val" id="histTotalTrades">0</span>
             </div>
             <div class="stat-chip">
-              <span class="stat-chip-label"><i data-lucide="trending-up"></i> Win Rate</span>
+              <span class="stat-chip-label"><i data-lucide="trending-up"></i> <span data-i18n="hist_win_rate">Win Rate</span></span>
               <span class="stat-chip-val text-green" id="histWinRate">0.0%</span>
             </div>
             <div class="stat-chip">
-              <span class="stat-chip-label"><i data-lucide="dollar-sign"></i> Akumulasi PnL</span>
+              <span class="stat-chip-label"><i data-lucide="dollar-sign"></i> <span data-i18n="hist_accum_pnl">Akumulasi PnL</span></span>
               <span class="stat-chip-val" id="histTotalPnl">$0.00 USDT</span>
             </div>
             <div class="stat-chip">
-              <span class="stat-chip-label"><i data-lucide="bar-chart-2"></i> Menang / Kalah</span>
+              <span class="stat-chip-label"><i data-lucide="bar-chart-2"></i> <span data-i18n="hist_win_loss">Menang / Kalah</span></span>
               <span class="stat-chip-val" id="histWinLoss">0W / 0L</span>
             </div>
           </div>
@@ -257,15 +265,15 @@
             <table class="data-table" id="closedTradesTable">
               <thead>
                 <tr>
-                  <th>Waktu Selesai</th>
-                  <th>Simbol & Arah</th>
-                  <th>Aksi</th>
-                  <th>Volume</th>
-                  <th>Harga Beli</th>
-                  <th>Harga Jual</th>
-                  <th>Realized PnL</th>
-                  <th>ROI / PnL %</th>
-                  <th>Tipe Akun</th>
+                  <th data-i18n="th_closed_time">Waktu Selesai</th>
+                  <th data-i18n="th_symbol_side">Simbol & Arah</th>
+                  <th data-i18n="th_action">Aksi</th>
+                  <th data-i18n="th_qty">Volume</th>
+                  <th data-i18n="th_entry_price">Harga Beli</th>
+                  <th data-i18n="th_close_price">Harga Jual</th>
+                  <th data-i18n="th_realized_pnl">Realized PnL</th>
+                  <th data-i18n="th_roi_pnl_pct">ROI / PnL %</th>
+                  <th data-i18n="th_account_type">Tipe Akun</th>
                 </tr>
               </thead>
               <tbody id="closedTradesTableBody">
@@ -273,8 +281,8 @@
                   <td colspan="9">
                     <div class="empty-state">
                       <i data-lucide="history" class="empty-icon"></i>
-                      <p>Belum ada riwayat transaksi yang ditutup.</p>
-                      <small>Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.</small>
+                      <p data-i18n="empty_closed_title">Belum ada riwayat transaksi yang ditutup.</p>
+                      <small data-i18n="empty_closed_desc">Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.</small>
                     </div>
                   </td>
                 </tr>
@@ -289,10 +297,10 @@
         <div class="section-bar">
           <div class="section-title">
             <i data-lucide="terminal" class="section-icon text-cyan"></i>
-            <h2>Live Event Terminal Log</h2>
+            <h2 data-i18n="terminal_title">Live Event Terminal Log</h2>
           </div>
           <div class="terminal-actions">
-            <button class="btn-sm btn-ghost" onclick="clearLogs()">Bersihkan Log</button>
+            <button class="btn-sm btn-ghost" onclick="clearLogs()" data-i18n="btn_clear_log">Bersihkan Log</button>
           </div>
         </div>
 
@@ -312,7 +320,7 @@
       <div class="modal-header">
         <div class="modal-title">
           <i data-lucide="sliders" class="modal-icon"></i>
-          <h2>Konfigurasi Copy Trading & Proxy</h2>
+          <h2 data-i18n="modal_settings_title">Konfigurasi Copy Trading & Proxy</h2>
         </div>
         <button class="btn-close" onclick="closeSettingsModal()">&times;</button>
       </div>
@@ -320,25 +328,25 @@
       <div class="modal-body">
         <!-- Tab 0: Mode Simulasi (Paper Trading / Free Trial) -->
         <fieldset class="form-group-fieldset" style="border-color: rgba(59, 130, 246, 0.5); background: rgba(59, 130, 246, 0.05);">
-          <legend style="color: #60a5fa;"><i data-lucide="flask-conical"></i> Mode Simulasi (Paper Trading - Uji Coba Bebas Risiko)</legend>
+          <legend style="color: #60a5fa;"><i data-lucide="flask-conical"></i> <span data-i18n="legend_sim">Mode Simulasi (Paper Trading - Uji Coba Bebas Risiko)</span></legend>
           <div class="form-row">
             <div class="form-field checkbox-field">
               <label class="custom-checkbox">
                 <input type="checkbox" id="checkPaperTrading" checked onchange="togglePaperTradingInputs()">
                 <span class="checkmark"></span>
-                <span style="font-weight: 600; color: #93c5fd;">Aktifkan Mode Simulasi (Uji Coba 100% GRATIS tanpa uang sungguhan & tanpa resiko)</span>
+                <span style="font-weight: 600; color: #93c5fd;" data-i18n="check_sim_label">Aktifkan Mode Simulasi (Uji Coba 100% GRATIS tanpa uang sungguhan & tanpa resiko)</span>
               </label>
             </div>
           </div>
           <div class="form-row" id="paperTradingInputsRow">
             <div class="form-field">
-              <label for="inputVirtualBalance">Saldo Virtual Simulasi (USDT):</label>
+              <label for="inputVirtualBalance" data-i18n="label_sim_balance">Saldo Virtual Simulasi (USDT):</label>
               <input type="number" id="inputVirtualBalance" step="10" min="10" value="100">
-              <small>Saldo virtual untuk menguji presisi perhitungan rasio lot dan profit/loss bot.</small>
+              <small data-i18n="hint_sim_balance">Saldo virtual untuk menguji presisi perhitungan rasio lot dan profit/loss bot.</small>
             </div>
             <div class="form-field" style="justify-content: flex-end;">
               <button type="button" class="btn btn-sm btn-ghost" onclick="resetDemoData()" style="color: #f87171; border: 1px solid rgba(248,113,113,0.3);">
-                <i data-lucide="trash-2"></i> Reset & Hapus Riwayat Demo
+                <i data-lucide="trash-2"></i> <span data-i18n="btn_reset_demo">Reset & Hapus Riwayat Demo</span>
               </button>
             </div>
           </div>
@@ -346,85 +354,85 @@
 
         <!-- Tab 1: Leader & Mode -->
         <fieldset class="form-group-fieldset">
-          <legend><i data-lucide="target"></i> Target Lead Trader & Sizing</legend>
+          <legend><i data-lucide="target"></i> <span data-i18n="legend_target">Target Lead Trader & Sizing</span></legend>
           <div class="form-row">
             <div class="form-field">
-              <label for="inputPortfolioId">Portfolio ID Leader Binance:</label>
+              <label for="inputPortfolioId" data-i18n="label_portfolio_id">Portfolio ID Leader Binance:</label>
               <div class="input-with-button">
                 <input type="text" id="inputPortfolioId" placeholder="Misal: 5154344801714752768" value="5154344801714752768">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="previewLeader()">Preview</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="previewLeader()" data-i18n="btn_preview_leader">Preview</button>
               </div>
-              <small>ID di URL Binance: binance.com/en/copy-trading/lead-details/<b>[ID]</b></small>
+              <small data-i18n="hint_portfolio_id">ID di URL Binance: binance.com/en/copy-trading/lead-details/<b>[ID]</b></small>
             </div>
 
             <div class="form-field">
-              <label for="selectMode">Mode Perhitungan Rasio:</label>
+              <label for="selectMode" data-i18n="label_mode">Mode Perhitungan Rasio:</label>
               <select id="selectMode">
-                <option value="RATIO_EQUITY">Rasio Modal (Proporsional Modal Anda / Modal Leader)</option>
-                <option value="FIXED_AMOUNT">Nominal Tetap per Koin (USDT)</option>
-                <option value="FIXED_RATIO">Persentase Tetap dari Saldo (5% per Koin)</option>
+                <option value="RATIO_EQUITY" data-i18n="opt_mode_equity">Rasio Modal (Proporsional Modal Anda / Modal Leader)</option>
+                <option value="FIXED_AMOUNT" data-i18n="opt_mode_fixed">Nominal Tetap per Koin (USDT)</option>
+                <option value="FIXED_RATIO" data-i18n="opt_mode_ratio">Persentase Tetap dari Saldo (5% per Koin)</option>
               </select>
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-field">
-              <label for="inputRatioMultiplier">Pengali Rasio (Multiplier):</label>
+              <label for="inputRatioMultiplier" data-i18n="label_ratio_multiplier">Pengali Rasio (Multiplier):</label>
               <input type="number" id="inputRatioMultiplier" step="0.1" min="0.1" max="10.0" value="1.0">
-              <small>Default: 1.0 (100% proporsional). Set 0.5 untuk separuh risiko.</small>
+              <small data-i18n="hint_ratio_multiplier">Default: 1.0 (100% proporsional). Set 0.5 untuk separuh risiko.</small>
             </div>
 
             <div class="form-field">
-              <label for="inputFixedAmount">Nominal Tetap per Posisi (USDT):</label>
+              <label for="inputFixedAmount" data-i18n="label_fixed_amount">Nominal Tetap per Posisi (USDT):</label>
               <input type="number" id="inputFixedAmount" step="1" min="6" value="25">
-              <small>Hanya berlaku jika Mode = Nominal Tetap.</small>
+              <small data-i18n="hint_fixed_amount">Hanya berlaku jika Mode = Nominal Tetap.</small>
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-field">
-              <label for="selectPollingInterval">Kecepatan Pantau (Polling Interval):</label>
+              <label for="selectPollingInterval" data-i18n="label_polling_interval">Kecepatan Pantau (Polling Interval):</label>
               <select id="selectPollingInterval">
-                <option value="1000">⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)</option>
-                <option value="1500">⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)</option>
-                <option value="2000">⚖️ 2.0 Detik (Seimbang & Hemat Kuota Proxy)</option>
-                <option value="2500">🛡️ 2.5 Detik (Standar)</option>
-                <option value="3000">🛡️ 3.0 Detik (Santai / Swing Trading)</option>
+                <option value="1000" data-i18n="opt_poll_1000">⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)</option>
+                <option value="1500" data-i18n="opt_poll_1500">⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)</option>
+                <option value="2000" data-i18n="opt_poll_2000">⚖️ 2.0 Detik (Seimbang & Hemat Kuota Proxy)</option>
+                <option value="2500" data-i18n="opt_poll_2500">🛡️ 2.5 Detik (Standar)</option>
+                <option value="3000" data-i18n="opt_poll_3000">🛡️ 3.0 Detik (Santai / Swing Trading)</option>
               </select>
-              <small>Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).</small>
+              <small data-i18n="hint_polling_interval">Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).</small>
             </div>
           </div>
         </fieldset>
 
         <!-- Tab 2: Safety & Risk Limits -->
         <fieldset class="form-group-fieldset">
-          <legend><i data-lucide="shield-check"></i> Safety Guard & Manajemen Risiko</legend>
+          <legend><i data-lucide="shield-check"></i> <span data-i18n="legend_safety">Safety Guard & Manajemen Risiko</span></legend>
           <div class="form-row">
             <div class="form-field">
-              <label for="inputMaxModalPerCoin">Safety Cap (Maksimal Margin per Koin USDT):</label>
+              <label for="inputMaxModalPerCoin" data-i18n="label_max_modal">Safety Cap (Maksimal Margin per Koin USDT):</label>
               <input type="number" id="inputMaxModalPerCoin" step="5" min="10" value="50">
-              <small>Mencegah modal habis jika leader melakukan averaging terus-menerus.</small>
+              <small data-i18n="hint_max_modal">Mencegah modal habis jika leader melakukan averaging terus-menerus.</small>
             </div>
 
             <div class="form-field">
-              <label for="inputMaxSlippage">Toleransi Slippage Maksimal (%):</label>
+              <label for="inputMaxSlippage" data-i18n="label_max_slippage">Toleransi Slippage Maksimal (%):</label>
               <input type="number" id="inputMaxSlippage" step="0.1" min="0.1" max="5.0" value="0.5">
-              <small>Batalkan order jika harga sudah lari > toleransi dari entry leader.</small>
+              <small data-i18n="hint_max_slippage">Batalkan order jika harga sudah lari > toleransi dari entry leader.</small>
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-field">
-              <label for="inputEmergencySl">Emergency Stop Loss Akun (%):</label>
+              <label for="inputEmergencySl" data-i18n="label_emergency_sl">Emergency Stop Loss Akun (%):</label>
               <input type="number" id="inputEmergencySl" step="1" min="3" max="50" value="10">
-              <small>Auto cut-loss independen jika floating minus akun mencapai X%.</small>
+              <small data-i18n="hint_emergency_sl">Auto cut-loss independen jika floating minus akun mencapai X%.</small>
             </div>
 
             <div class="form-field checkbox-field">
               <label class="custom-checkbox">
                 <input type="checkbox" id="checkSyncLeverage" checked>
                 <span class="checkmark"></span>
-                <span>Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)</span>
+                <span data-i18n="check_sync_leverage">Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)</span>
               </label>
             </div>
           </div>
@@ -432,53 +440,53 @@
 
         <!-- Tab 3: Residential Proxy -->
         <fieldset class="form-group-fieldset">
-          <legend><i data-lucide="globe"></i> Residential Proxy (Anti Blokir Cloudflare)</legend>
+          <legend><i data-lucide="globe"></i> <span data-i18n="legend_proxy">Residential Proxy (Anti Blokir Cloudflare)</span></legend>
           <div class="form-row">
             <div class="form-field checkbox-field">
               <label class="custom-checkbox">
                 <input type="checkbox" id="checkProxyEnabled" onchange="toggleProxyInputs()">
                 <span class="checkmark"></span>
-                <span>Aktifkan Residential Proxy (Rekomendasi: DataImpulse / Webshare)</span>
+                <span data-i18n="check_proxy_enable">Aktifkan Residential Proxy (Rekomendasi: DataImpulse / Webshare)</span>
               </label>
             </div>
             <div class="form-field">
               <button type="button" class="btn btn-sm btn-info" id="btnTestProxy" onclick="testProxy()">
-                <i data-lucide="radio"></i> Uji Koneksi Proxy
+                <i data-lucide="radio"></i> <span data-i18n="btn_test_proxy">Uji Koneksi Proxy</span>
               </button>
             </div>
           </div>
 
           <div class="form-row" id="proxyInputsRow">
             <div class="form-field">
-              <label for="inputProxyHost">Proxy Host / IP:</label>
-              <input type="text" id="inputProxyHost" placeholder="Misal: geo.dataimpulse.com">
+              <label for="inputProxyHost" data-i18n="label_proxy_host">Proxy Host / IP:</label>
+              <input type="text" id="inputProxyHost" placeholder="Misal: gw.dataimpulse.com" data-i18n-placeholder="placeholder_proxy_host">
             </div>
             <div class="form-field">
-              <label for="inputProxyPort">Port:</label>
+              <label for="inputProxyPort" data-i18n="label_proxy_port">Port:</label>
               <input type="number" id="inputProxyPort" placeholder="823">
             </div>
             <div class="form-field">
-              <label for="inputProxyUser">Username:</label>
-              <input type="text" id="inputProxyUser" placeholder="Username proxy">
+              <label for="inputProxyUser" data-i18n="label_proxy_user">Username:</label>
+              <input type="text" id="inputProxyUser" placeholder="Username proxy" data-i18n-placeholder="placeholder_proxy_user">
             </div>
             <div class="form-field">
-              <label for="inputProxyPass">Password:</label>
-              <input type="password" id="inputProxyPass" placeholder="Password proxy">
+              <label for="inputProxyPass" data-i18n="label_proxy_pass">Password:</label>
+              <input type="password" id="inputProxyPass" placeholder="Password proxy" data-i18n-placeholder="placeholder_proxy_pass">
             </div>
           </div>
         </fieldset>
 
         <!-- Tab 4: Binance API Keys -->
         <fieldset class="form-group-fieldset">
-          <legend><i data-lucide="key"></i> Kredensial Binance Futures API Anda</legend>
+          <legend><i data-lucide="key"></i> <span data-i18n="legend_api">Kredensial Binance Futures API Anda</span></legend>
           <div class="form-row">
             <div class="form-field">
-              <label for="inputApiKey">Binance API Key:</label>
-              <input type="text" id="inputApiKey" placeholder="Masukkan API Key Binance Futures Anda">
+              <label for="inputApiKey" data-i18n="label_api_key">Binance API Key:</label>
+              <input type="text" id="inputApiKey" placeholder="Masukkan API Key Binance Futures Anda" data-i18n-placeholder="placeholder_api_key">
             </div>
             <div class="form-field">
-              <label for="inputSecretKey">Binance Secret Key:</label>
-              <input type="password" id="inputSecretKey" placeholder="Masukkan Secret Key Binance Futures Anda">
+              <label for="inputSecretKey" data-i18n="label_secret_key">Binance Secret Key:</label>
+              <input type="password" id="inputSecretKey" placeholder="Masukkan Secret Key Binance Futures Anda" data-i18n-placeholder="placeholder_secret_key">
             </div>
           </div>
           <div class="form-row">
@@ -486,7 +494,7 @@
               <label class="custom-checkbox">
                 <input type="checkbox" id="checkIsTestnet">
                 <span class="checkmark"></span>
-                <span>Gunakan Binance Testnet (Mode Simulasi Demo)</span>
+                <span data-i18n="check_testnet">Gunakan Binance Testnet (Mode Simulasi Demo)</span>
               </label>
             </div>
           </div>
@@ -494,19 +502,19 @@
 
         <!-- Tab 5: Keamanan & Password Admin -->
         <fieldset class="form-group-fieldset">
-          <legend><i data-lucide="lock"></i> Keamanan & Password Admin</legend>
+          <legend><i data-lucide="lock"></i> <span data-i18n="legend_security">Keamanan & Password Admin</span></legend>
           <div class="form-row">
             <div class="form-field">
-              <label for="inputCurrentPass">Password Admin Saat Ini:</label>
-              <input type="password" id="inputCurrentPass" placeholder="Password saat ini">
+              <label for="inputCurrentPass" data-i18n="label_current_pass">Password Admin Saat Ini:</label>
+              <input type="password" id="inputCurrentPass" placeholder="Password saat ini" data-i18n-placeholder="placeholder_current_pass">
             </div>
             <div class="form-field">
-              <label for="inputNewPass">Password Baru:</label>
-              <input type="password" id="inputNewPass" placeholder="Minimal 6 karakter">
+              <label for="inputNewPass" data-i18n="label_new_pass">Password Baru:</label>
+              <input type="password" id="inputNewPass" placeholder="Minimal 6 karakter" data-i18n-placeholder="placeholder_new_pass">
             </div>
             <div class="form-field" style="justify-content: flex-end;">
               <button type="button" class="btn btn-sm btn-secondary" onclick="changeAdminPassword()">
-                <i data-lucide="check"></i> Ganti Password
+                <i data-lucide="check"></i> <span data-i18n="btn_change_pass">Ganti Password</span>
               </button>
             </div>
           </div>
@@ -514,8 +522,8 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeSettingsModal()">Batal</button>
-        <button class="btn btn-primary" onclick="saveSettings()">Simpan Pengaturan</button>
+        <button class="btn btn-secondary" onclick="closeSettingsModal()" data-i18n="btn_cancel">Batal</button>
+        <button class="btn btn-primary" onclick="saveSettings()" data-i18n="btn_save_settings">Simpan Pengaturan</button>
       </div>
     </div>
   </div>
@@ -527,21 +535,21 @@
         <div class="lock-icon-box">
           <i data-lucide="shield-alert" class="lock-icon"></i>
         </div>
-        <h2>SISTEM TERKUNCI</h2>
-        <p>Masukkan Master Password Admin untuk mengakses bot Binance Copy Trader</p>
+        <h2 data-i18n="login_title">SISTEM TERKUNCI</h2>
+        <p data-i18n="login_desc">Masukkan Master Password Admin untuk mengakses bot Binance Copy Trader</p>
       </div>
       <form onsubmit="handleLoginSubmit(event)">
         <div class="form-field">
-          <label for="loginPassword">Master Password Admin:</label>
-          <input type="password" id="loginPassword" placeholder="Masukkan password..." autocomplete="current-password" required>
+          <label for="loginPassword" data-i18n="login_pass_label">Master Password Admin:</label>
+          <input type="password" id="loginPassword" placeholder="Masukkan password..." data-i18n-placeholder="login_pass_placeholder" autocomplete="current-password" required>
         </div>
         <div id="loginErrorMsg" class="login-error" style="display: none;"></div>
         <button type="submit" class="btn btn-primary btn-block" id="btnLoginSubmit">
-          <i data-lucide="unlock"></i> Buka Dashboard
+          <i data-lucide="unlock"></i> <span data-i18n="btn_unlock">Buka Dashboard</span>
         </button>
       </form>
       <div class="login-hint">
-        <small>Password default: <code>admin123</code> (dapat diubah di menu Pengaturan).</small>
+        <small data-i18n="login_hint">Password default: <code>admin123</code> (dapat diubah di menu Pengaturan).</small>
       </div>
     </div>
   </div>

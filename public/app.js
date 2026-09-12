@@ -1,11 +1,444 @@
 // State variables
 const TOKEN_KEY = 'copytrader_jwt_token';
+const LANG_KEY = 'copytrader_lang';
+let currentLang = localStorage.getItem(LANG_KEY) || 'id';
 let ws = null;
 let currentConfig = null;
 let currentStatus = null;
 let isEngineActive = false;
 let currentTableTab = 'active';
 let closedTradesList = [];
+let lastPositionsData = null;
+let lastBalanceData = null;
+let lastUserPositions = null;
+
+// ==========================================
+// I18N DICTIONARY (INDONESIAN & ENGLISH)
+// ==========================================
+const I18N = {
+  id: {
+    brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
+    sim_free_trial: 'SIMULASI (FREE TRIAL)',
+    sim_testnet: 'BINANCE TESTNET',
+    sim_live: 'LIVE BINANCE FUTURES',
+    status_standby: 'STANDBY',
+    status_running: 'RUNNING',
+    status_ip_blocked: 'IP DIBLOKIR (403)',
+    status_quota_out: 'KUOTA HABIS (407)',
+    btn_start_engine: 'Mulai Copy Trade',
+    btn_stop_engine: 'Hentikan Copy Trade',
+    btn_panic_close: 'Panic Close All',
+    btn_settings: 'Pengaturan',
+    btn_logout: 'Logout',
+    btn_logout_title: 'Kunci / Logout',
+
+    leader_card_title: 'Target Lead Trader',
+    leader_followers_prefix: 'Followers:',
+    leader_equity_label: 'Modal/Equity Leader',
+    leader_roi_label: 'ROI 7D',
+    leader_mdd_label: 'Max Drawdown 7D',
+
+    user_card_title: 'Akun Binance Futures Anda',
+    user_mode_sim: 'SIMULASI DEMO',
+    user_mode_testnet: 'BINANCE TESTNET',
+    user_mode_live: 'LIVE FUTURES',
+    user_balance_label: 'Total Saldo Margin',
+    user_available_label: 'Saldo Tersedia',
+    user_unrealized_label: 'Unrealized PnL',
+    user_positions_label: 'Posisi Terbuka',
+    user_positions_unit: 'Posisi',
+
+    engine_card_title: 'Status Engine & Proxy',
+    proxy_active: 'Proxy: Aktif',
+    proxy_disabled: 'Proxy: Nonaktif (Direct DoH)',
+    proxy_blocked: 'Proxy: Terblokir (403)',
+    proxy_quota_out: 'Proxy: Kuota Habis (407)',
+    spec_mode_label: 'Sizing Mode:',
+    spec_mode_fixed: 'Tetap',
+    spec_mode_ratio_balance: 'Rasio Saldo (5%)',
+    spec_mode_ratio_equity: 'Rasio Modal',
+    spec_safety_cap_label: 'Safety Cap:',
+    spec_slippage_label: 'Slippage Guard:',
+    spec_polling_label: 'Polling Jitter:',
+    spec_emergency_sl_label: 'Emergency SL:',
+    spec_emergency_sl_suffix: '% Cut Loss',
+    spec_leverage_label: 'Sync Leverage:',
+    spec_leverage_auto: 'Otomatis (Cross)',
+    spec_leverage_manual: 'Manual',
+
+    tab_active_positions: 'Posisi Terbuka',
+    tab_closed_trades: 'Riwayat Trade Selesai',
+    live_indicator: 'Live',
+    refresh_tooltip: 'Segarkan Data',
+    clear_history_tooltip: 'Bersihkan Riwayat Trade Selesai',
+
+    th_symbol_side: 'Simbol & Arah',
+    th_leader_pos: 'Posisi Leader',
+    th_leader_entry: 'Entry Leader',
+    th_user_pos: 'Posisi Akun Anda',
+    th_user_entry: 'Entry Anda',
+    th_ratio: 'Rasio Akun',
+    th_floating_pnl: 'Floating PnL',
+    th_sync_status: 'Status Sinkron',
+
+    th_closed_time: 'Waktu Selesai',
+    th_action: 'Aksi',
+    th_qty: 'Volume',
+    th_entry_price: 'Harga Beli',
+    th_close_price: 'Harga Jual',
+    th_realized_pnl: 'Realized PnL',
+    th_roi_pnl_pct: 'ROI / PnL %',
+    th_account_type: 'Tipe Akun',
+
+    hist_total_closed: 'Total Selesai',
+    hist_win_rate: 'Win Rate',
+    hist_accum_pnl: 'Akumulasi PnL',
+    hist_win_loss: 'Menang / Kalah',
+
+    empty_open_title: 'Leader saat ini belum memiliki posisi aktif yang terbuka.',
+    empty_open_desc: 'Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.',
+    empty_private_title: 'Mode Privat Aktif pada Leader Ini',
+    empty_private_desc: 'Leader menyembunyikan tab Positions dari publik. Bot otomatis membaca stream feed Latest Records dan akan mengeksekusi order begitu Leader bertransaksi.',
+    empty_closed_title: 'Belum ada riwayat transaksi yang ditutup.',
+    empty_closed_desc: 'Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.',
+
+    badge_connected: 'TERKONEKSI',
+    badge_active_stream: 'AKTIF (STREAM)',
+    badge_waiting_close: 'MENUNGGU CLOSE',
+    badge_waiting_sync: 'MENUNGGU SINKRON',
+    badge_action_full: 'Tutup Penuh',
+    badge_action_partial: 'Tutup Parsial',
+    badge_action_sl: 'Emergency SL',
+    badge_action_panic: 'Panic Close',
+    badge_sim: 'Simulasi',
+    badge_live: 'Live',
+
+    terminal_title: 'Live Event Terminal Log',
+    btn_clear_log: 'Bersihkan Log',
+    terminal_init_msg: 'Binance Copy Trader Web Dashboard initialized. Siap memantau aktivitas leader.',
+
+    modal_settings_title: 'Konfigurasi Copy Trading & Proxy',
+    legend_sim: 'Mode Simulasi (Paper Trading - Uji Coba Bebas Risiko)',
+    check_sim_label: 'Aktifkan Mode Simulasi (Uji Coba 100% GRATIS tanpa uang sungguhan & tanpa resiko)',
+    label_sim_balance: 'Saldo Virtual Simulasi (USDT):',
+    hint_sim_balance: 'Saldo virtual untuk menguji presisi perhitungan rasio lot dan profit/loss bot.',
+    btn_reset_demo: 'Reset & Hapus Riwayat Demo',
+    legend_target: 'Target Lead Trader & Sizing',
+    label_portfolio_id: 'Portfolio ID Leader Binance:',
+    btn_preview_leader: 'Preview',
+    hint_portfolio_id: 'ID di URL Binance: binance.com/en/copy-trading/lead-details/',
+    label_mode: 'Mode Perhitungan Rasio:',
+    opt_mode_equity: 'Rasio Modal (Proporsional Modal Anda / Modal Leader)',
+    opt_mode_fixed: 'Nominal Tetap per Koin (USDT)',
+    opt_mode_ratio: 'Persentase Tetap dari Saldo (5% per Koin)',
+    label_ratio_multiplier: 'Pengali Rasio (Multiplier):',
+    hint_ratio_multiplier: 'Default: 1.0 (100% proporsional). Set 0.5 untuk separuh risiko.',
+    label_fixed_amount: 'Nominal Tetap per Posisi (USDT):',
+    hint_fixed_amount: 'Hanya berlaku jika Mode = Nominal Tetap.',
+    label_polling_interval: 'Kecepatan Pantau (Polling Interval):',
+    opt_poll_1000: '⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)',
+    opt_poll_1500: '⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)',
+    opt_poll_2000: '⚖️ 2.0 Detik (Seimbang & Hemat Kuota Proxy)',
+    opt_poll_2500: '🛡️ 2.5 Detik (Standar)',
+    opt_poll_3000: '🛡️ 3.0 Detik (Santai / Swing Trading)',
+    hint_polling_interval: 'Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).',
+    legend_safety: 'Safety Guard & Manajemen Risiko',
+    label_max_modal: 'Safety Cap (Maksimal Margin per Koin USDT):',
+    hint_max_modal: 'Mencegah modal habis jika leader melakukan averaging terus-menerus.',
+    label_max_slippage: 'Toleransi Slippage Maksimal (%):',
+    hint_max_slippage: 'Batalkan order jika harga sudah lari > toleransi dari entry leader.',
+    label_emergency_sl: 'Emergency Stop Loss Akun (%):',
+    hint_emergency_sl: 'Auto cut-loss independen jika floating minus akun mencapai X%.',
+    check_sync_leverage: 'Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)',
+    legend_proxy: 'Residential Proxy (Anti Blokir Cloudflare)',
+    check_proxy_enable: 'Aktifkan Residential Proxy (Rekomendasi: DataImpulse / Webshare)',
+    btn_test_proxy: 'Uji Koneksi Proxy',
+    label_proxy_host: 'Proxy Host / IP:',
+    placeholder_proxy_host: 'Misal: gw.dataimpulse.com',
+    label_proxy_port: 'Port:',
+    label_proxy_user: 'Username:',
+    placeholder_proxy_user: 'Username proxy',
+    label_proxy_pass: 'Password:',
+    placeholder_proxy_pass: 'Password proxy',
+    legend_api: 'Kredensial Binance Futures API Anda',
+    label_api_key: 'Binance API Key:',
+    placeholder_api_key: 'Masukkan API Key Binance Futures Anda',
+    label_secret_key: 'Binance Secret Key:',
+    placeholder_secret_key: 'Masukkan Secret Key Binance Futures Anda',
+    check_testnet: 'Gunakan Binance Testnet (Mode Simulasi Demo)',
+    legend_security: 'Keamanan & Password Admin',
+    label_current_pass: 'Password Admin Saat Ini:',
+    placeholder_current_pass: 'Password saat ini',
+    label_new_pass: 'Password Baru:',
+    placeholder_new_pass: 'Minimal 6 karakter',
+    btn_change_pass: 'Ganti Password',
+    btn_cancel: 'Batal',
+    btn_save_settings: 'Simpan Pengaturan',
+
+    login_title: 'SISTEM TERKUNCI',
+    login_desc: 'Masukkan Master Password Admin untuk mengakses bot Binance Copy Trader',
+    login_pass_label: 'Master Password Admin:',
+    login_pass_placeholder: 'Masukkan password...',
+    btn_unlock: 'Buka Dashboard',
+    login_hint: 'Password default: admin123 (dapat diubah di menu Pengaturan).',
+
+    alert_pass_empty: 'Harap isi password saat ini dan password baru!',
+    alert_pass_min: 'Password baru minimal 6 karakter!',
+    alert_pass_success: '✅ Password admin berhasil diperbarui!',
+    alert_hist_empty: 'Riwayat transaksi selesai masih kosong.',
+    confirm_clear_hist: 'Apakah Anda yakin ingin menghapus seluruh riwayat trade selesai?',
+    alert_clear_hist_success: '✅ Riwayat trade selesai berhasil dibersihkan!',
+    confirm_panic_close: 'APAKAH ANDA YAKIN?\n\nSemua posisi copy-trade yang sedang terbuka di akun Binance Anda akan ditutup seketika dengan order Market!',
+    confirm_reset_demo: 'Apakah Anda yakin ingin menghapus semua riwayat transaksi & posisi virtual demo?',
+    alert_reset_demo_success: '✅ Data riwayat demo & posisi virtual telah dibersihkan!',
+    alert_test_proxy_need_host: 'Harap masukkan Host dan Port proxy terlebih dahulu sebelum menguji!',
+    alert_preview_need_id: 'Masukkan Portfolio ID terlebih dahulu',
+    alert_settings_saved: '✅ Pengaturan berhasil disimpan!'
+  },
+  en: {
+    brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
+    sim_free_trial: 'SIMULATION (FREE TRIAL)',
+    sim_testnet: 'BINANCE TESTNET',
+    sim_live: 'LIVE BINANCE FUTURES',
+    status_standby: 'STANDBY',
+    status_running: 'RUNNING',
+    status_ip_blocked: 'IP BLOCKED (403)',
+    status_quota_out: 'QUOTA EXHAUSTED (407)',
+    btn_start_engine: 'Start Copy Trade',
+    btn_stop_engine: 'Stop Copy Trade',
+    btn_panic_close: 'Panic Close All',
+    btn_settings: 'Settings',
+    btn_logout: 'Logout',
+    btn_logout_title: 'Lock / Logout',
+
+    leader_card_title: 'Target Lead Trader',
+    leader_followers_prefix: 'Followers:',
+    leader_equity_label: 'Leader Margin/Equity',
+    leader_roi_label: 'ROI 7D',
+    leader_mdd_label: 'Max Drawdown 7D',
+
+    user_card_title: 'Your Binance Futures Account',
+    user_mode_sim: 'DEMO SIMULATION',
+    user_mode_testnet: 'BINANCE TESTNET',
+    user_mode_live: 'LIVE FUTURES',
+    user_balance_label: 'Total Margin Balance',
+    user_available_label: 'Available Balance',
+    user_unrealized_label: 'Unrealized PnL',
+    user_positions_label: 'Open Positions',
+    user_positions_unit: 'Positions',
+
+    engine_card_title: 'Engine & Proxy Status',
+    proxy_active: 'Proxy: Active',
+    proxy_disabled: 'Proxy: Disabled (Direct DoH)',
+    proxy_blocked: 'Proxy: Blocked (403)',
+    proxy_quota_out: 'Proxy: Quota Out (407)',
+    spec_mode_label: 'Sizing Mode:',
+    spec_mode_fixed: 'Fixed',
+    spec_mode_ratio_balance: 'Balance Ratio (5%)',
+    spec_mode_ratio_equity: 'Equity Ratio',
+    spec_safety_cap_label: 'Safety Cap:',
+    spec_slippage_label: 'Slippage Guard:',
+    spec_polling_label: 'Polling Jitter:',
+    spec_emergency_sl_label: 'Emergency SL:',
+    spec_emergency_sl_suffix: '% Cut Loss',
+    spec_leverage_label: 'Sync Leverage:',
+    spec_leverage_auto: 'Auto (Cross)',
+    spec_leverage_manual: 'Manual',
+
+    tab_active_positions: 'Open Positions',
+    tab_closed_trades: 'Closed Trades History',
+    live_indicator: 'Live',
+    refresh_tooltip: 'Refresh Data',
+    clear_history_tooltip: 'Clear Closed Trades History',
+
+    th_symbol_side: 'Symbol & Side',
+    th_leader_pos: 'Leader Position',
+    th_leader_entry: 'Leader Entry',
+    th_user_pos: 'Your Position',
+    th_user_entry: 'Your Entry',
+    th_ratio: 'Account Ratio',
+    th_floating_pnl: 'Floating PnL',
+    th_sync_status: 'Sync Status',
+
+    th_closed_time: 'Closed Time',
+    th_action: 'Action',
+    th_qty: 'Quantity',
+    th_entry_price: 'Entry Price',
+    th_close_price: 'Close Price',
+    th_realized_pnl: 'Realized PnL',
+    th_roi_pnl_pct: 'ROI / PnL %',
+    th_account_type: 'Account Type',
+
+    hist_total_closed: 'Total Closed',
+    hist_win_rate: 'Win Rate',
+    hist_accum_pnl: 'Accumulated PnL',
+    hist_win_loss: 'Win / Loss',
+
+    empty_open_title: 'Leader currently has no active open positions.',
+    empty_open_desc: 'Bot will automatically mirror positions once the Leader enters a trade.',
+    empty_private_title: 'Private Positions Mode Active on This Leader',
+    empty_private_desc: 'Leader hides the Positions tab from public. Bot automatically reads the Latest Records stream feed and will execute orders as soon as the Leader trades.',
+    empty_closed_title: 'No closed trade records yet.',
+    empty_closed_desc: 'Every closed trade (full TP, partial TP, cut loss) will be neatly logged here.',
+
+    badge_connected: 'CONNECTED',
+    badge_active_stream: 'ACTIVE (STREAM)',
+    badge_waiting_close: 'WAITING CLOSE',
+    badge_waiting_sync: 'WAITING SYNC',
+    badge_action_full: 'Full Close',
+    badge_action_partial: 'Partial Close',
+    badge_action_sl: 'Emergency SL',
+    badge_action_panic: 'Panic Close',
+    badge_sim: 'Simulation',
+    badge_live: 'Live',
+
+    terminal_title: 'Live Event Terminal Log',
+    btn_clear_log: 'Clear Logs',
+    terminal_init_msg: 'Binance Copy Trader Web Dashboard initialized. Ready to track leader activity.',
+
+    modal_settings_title: 'Copy Trading & Proxy Configuration',
+    legend_sim: 'Simulation Mode (Paper Trading - Risk-Free Trial)',
+    check_sim_label: 'Enable Simulation Mode (100% FREE trial with no real money & zero risk)',
+    label_sim_balance: 'Virtual Simulation Balance (USDT):',
+    hint_sim_balance: 'Virtual balance to test lot sizing ratio and profit/loss calculations.',
+    btn_reset_demo: 'Reset & Clear Demo History',
+    legend_target: 'Target Lead Trader & Sizing',
+    label_portfolio_id: 'Binance Leader Portfolio ID:',
+    btn_preview_leader: 'Preview',
+    hint_portfolio_id: 'ID in Binance URL: binance.com/en/copy-trading/lead-details/',
+    label_mode: 'Position Sizing Mode:',
+    opt_mode_equity: 'Equity Ratio (Proportional User Balance / Leader Equity)',
+    opt_mode_fixed: 'Fixed Amount per Coin (USDT)',
+    opt_mode_ratio: 'Fixed Balance Ratio (5% per Coin)',
+    label_ratio_multiplier: 'Ratio Multiplier:',
+    hint_ratio_multiplier: 'Default: 1.0 (100% proportional). Set 0.5 for half risk.',
+    label_fixed_amount: 'Fixed Amount per Position (USDT):',
+    hint_fixed_amount: 'Only applies when Sizing Mode = Fixed Amount.',
+    label_polling_interval: 'Polling Speed (Refresh Rate):',
+    opt_poll_1000: '⚡ 1.0 Second (Super Fast / Demo Test)',
+    opt_poll_1500: '⚡ 1.5 Seconds (Optimal Balance - Recommended)',
+    opt_poll_2000: '⚖️ 2.0 Seconds (Balanced & Proxy Quota Saver)',
+    opt_poll_2500: '🛡️ 2.5 Seconds (Standard)',
+    opt_poll_3000: '🛡️ 3.0 Seconds (Relaxed / Swing Trading)',
+    hint_polling_interval: 'Frequency bot polls Binance for new leader transactions (in milliseconds).',
+    legend_safety: 'Safety Guard & Risk Management',
+    label_max_modal: 'Safety Cap (Max Margin per Coin USDT):',
+    hint_max_modal: 'Prevents account wipeout if leader aggressively averages down.',
+    label_max_slippage: 'Max Slippage Tolerance (%):',
+    hint_max_slippage: 'Cancel order if market price deviates > tolerance from leader entry.',
+    label_emergency_sl: 'Account Emergency Stop Loss (%):',
+    hint_emergency_sl: 'Independent auto cut-loss if account floating loss reaches X%.',
+    check_sync_leverage: 'Auto Sync Leader Leverage & Margin Mode (10x/20x Cross)',
+    legend_proxy: 'Residential Proxy (Cloudflare Bypass)',
+    check_proxy_enable: 'Enable Residential Proxy (Recommended: DataImpulse / Webshare)',
+    btn_test_proxy: 'Test Proxy Connection',
+    label_proxy_host: 'Proxy Host / IP:',
+    placeholder_proxy_host: 'e.g. gw.dataimpulse.com',
+    label_proxy_port: 'Port:',
+    label_proxy_user: 'Username:',
+    placeholder_proxy_user: 'Proxy username',
+    label_proxy_pass: 'Password:',
+    placeholder_proxy_pass: 'Proxy password',
+    legend_api: 'Your Binance Futures API Credentials',
+    label_api_key: 'Binance API Key:',
+    placeholder_api_key: 'Enter your Binance Futures API Key',
+    label_secret_key: 'Binance Secret Key:',
+    placeholder_secret_key: 'Enter your Binance Futures Secret Key',
+    check_testnet: 'Use Binance Testnet (Demo Simulation Mode)',
+    legend_security: 'Admin Security & Password',
+    label_current_pass: 'Current Admin Password:',
+    placeholder_current_pass: 'Current password',
+    label_new_pass: 'New Password:',
+    placeholder_new_pass: 'Minimum 6 characters',
+    btn_change_pass: 'Change Password',
+    btn_cancel: 'Cancel',
+    btn_save_settings: 'Save Settings',
+
+    login_title: 'SYSTEM LOCKED',
+    login_desc: 'Enter Master Admin Password to access Binance Copy Trader bot',
+    login_pass_label: 'Master Admin Password:',
+    login_pass_placeholder: 'Enter password...',
+    btn_unlock: 'Unlock Dashboard',
+    login_hint: 'Default password: admin123 (can be changed in Settings).',
+
+    alert_pass_empty: 'Please fill in both current and new password!',
+    alert_pass_min: 'New password must be at least 6 characters!',
+    alert_pass_success: '✅ Admin password successfully updated!',
+    alert_hist_empty: 'Closed trade history is still empty.',
+    confirm_clear_hist: 'Are you sure you want to clear all closed trade history?',
+    alert_clear_hist_success: '✅ Closed trade history successfully cleared!',
+    confirm_panic_close: 'ARE YOU SURE?\n\nAll open copy-trade positions on your Binance account will be immediately closed with Market orders!',
+    confirm_reset_demo: 'Are you sure you want to delete all demo trade history & virtual positions?',
+    alert_reset_demo_success: '✅ Demo history & virtual positions cleared successfully!',
+    alert_test_proxy_need_host: 'Please enter proxy Host and Port before testing!',
+    alert_preview_need_id: 'Please enter Portfolio ID first',
+    alert_settings_saved: '✅ Settings saved successfully!'
+  }
+};
+
+function t(key, fallback = '') {
+  return I18N[currentLang]?.[key] || fallback || key;
+}
+
+function toggleLanguage() {
+  currentLang = currentLang === 'id' ? 'en' : 'id';
+  localStorage.setItem(LANG_KEY, currentLang);
+  applyLanguage(currentLang);
+}
+
+function applyLanguage(lang) {
+  document.documentElement.lang = lang;
+
+  // Update navbar switch badges
+  const badgeId = document.getElementById('langBadgeId');
+  const badgeEn = document.getElementById('langBadgeEn');
+  if (badgeId && badgeEn) {
+    if (lang === 'id') {
+      badgeId.classList.add('active');
+      badgeEn.classList.remove('active');
+    } else {
+      badgeEn.classList.add('active');
+      badgeId.classList.remove('active');
+    }
+  }
+
+  // Update elements with data-i18n
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (I18N[lang] && I18N[lang][key] !== undefined) {
+      el.innerText = I18N[lang][key];
+    }
+  });
+
+  // Update elements with data-i18n-placeholder
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (I18N[lang] && I18N[lang][key] !== undefined) {
+      el.setAttribute('placeholder', I18N[lang][key]);
+    }
+  });
+
+  // Update elements with data-i18n-title
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    if (I18N[lang] && I18N[lang][key] !== undefined) {
+      el.setAttribute('title', I18N[lang][key]);
+    }
+  });
+
+  // Re-render active UI sections with translated strings
+  if (currentStatus) updateEngineUI(currentStatus);
+  if (currentConfig) updateConfigSpecs(currentConfig);
+  if (lastBalanceData !== null || lastUserPositions !== null) {
+    updateUserAccountUI(lastBalanceData, lastUserPositions);
+  }
+  if (lastPositionsData) {
+    renderPositionsTable(lastPositionsData.leaderPositions, lastPositionsData.userPositions, lastPositionsData.orders, lastPositionsData.positionShow);
+  }
+  if (currentTableTab === 'closed') {
+    renderClosedTradesTable();
+  }
+}
 
 // DOM Elements
 const engineStatusBadge = document.getElementById('engineStatusBadge');
@@ -168,11 +601,11 @@ async function changeAdminPassword() {
   const newPassword = inputNewPass.value.trim();
 
   if (!currentPassword || !newPassword) {
-    alert('Harap isi password saat ini dan password baru!');
+    alert(t('alert_pass_empty', 'Harap isi password saat ini dan password baru!'));
     return;
   }
   if (newPassword.length < 6) {
-    alert('Password baru minimal 6 karakter!');
+    alert(t('alert_pass_min', 'Password baru minimal 6 karakter!'));
     return;
   }
 
@@ -183,7 +616,7 @@ async function changeAdminPassword() {
     });
     const data = await res.json();
     if (data.success) {
-      alert('✅ Password admin berhasil diperbarui!');
+      alert(t('alert_pass_success', '✅ Password admin berhasil diperbarui!'));
       inputCurrentPass.value = '';
       inputNewPass.value = '';
     } else {
@@ -198,6 +631,7 @@ async function changeAdminPassword() {
 // INITIALIZE & WEBSOCKET
 // ==========================================
 window.addEventListener('DOMContentLoaded', async () => {
+  applyLanguage(currentLang);
   const token = getAuthToken();
   if (!token) {
     showLoginOverlay();
@@ -311,18 +745,28 @@ function updateEngineUI(status) {
   isEngineActive = status?.isActive || false;
 
   if (isEngineActive) {
-    statusDot.className = 'status-dot dot-active';
-    statusText.innerText = 'RUNNING';
-    statusText.style.color = 'var(--accent-green)';
+    if (status?.lastError && (status.lastError.includes('403') || status.lastError.includes('IP_BLOCKED'))) {
+      statusDot.className = 'status-dot dot-error';
+      statusText.innerText = t('status_ip_blocked', 'IP DIBLOKIR (403)');
+      statusText.style.color = 'var(--accent-red)';
+    } else if (status?.lastError && (status.lastError.includes('407') || status.lastError.includes('AUTH'))) {
+      statusDot.className = 'status-dot dot-error';
+      statusText.innerText = t('status_quota_out', 'KUOTA HABIS (407)');
+      statusText.style.color = 'var(--accent-red)';
+    } else {
+      statusDot.className = 'status-dot dot-active';
+      statusText.innerText = t('status_running', 'RUNNING');
+      statusText.style.color = 'var(--accent-green)';
+    }
     btnToggleEngine.className = 'btn btn-danger';
-    toggleBtnText.innerText = 'Hentikan Copy Trade';
+    toggleBtnText.innerText = t('btn_stop_engine', 'Hentikan Copy Trade');
     toggleIcon.setAttribute('data-lucide', 'square');
   } else {
     statusDot.className = 'status-dot dot-idle';
-    statusText.innerText = 'STANDBY';
+    statusText.innerText = t('status_standby', 'STANDBY');
     statusText.style.color = 'var(--text-muted)';
     btnToggleEngine.className = 'btn btn-success';
-    toggleBtnText.innerText = 'Mulai Copy Trade';
+    toggleBtnText.innerText = t('btn_start_engine', 'Mulai Copy Trade');
     toggleIcon.setAttribute('data-lucide', 'play');
   }
   lucide.createIcons({ root: btnToggleEngine });
@@ -342,11 +786,11 @@ function updateConfigSpecs(cfg) {
   // 2. Mode Sizing Display in Card 3
   if (specMode) {
     if (cfg.mode === 'FIXED_AMOUNT') {
-      specMode.innerText = `Tetap ($${Number(cfg.fixedAmountUsdt || 25).toFixed(0)} USDT)`;
+      specMode.innerText = `${t('spec_mode_fixed', 'Tetap')} ($${Number(cfg.fixedAmountUsdt || 25).toFixed(0)} USDT)`;
     } else if (cfg.mode === 'FIXED_RATIO') {
-      specMode.innerText = `Rasio Saldo (5%)`;
+      specMode.innerText = t('spec_mode_ratio_balance', 'Rasio Saldo (5%)');
     } else {
-      specMode.innerText = `Rasio Modal (${Number(cfg.ratioMultiplier || 1.0).toFixed(1)}x)`;
+      specMode.innerText = `${t('spec_mode_ratio_equity', 'Rasio Modal')} (${Number(cfg.ratioMultiplier || 1.0).toFixed(1)}x)`;
     }
   }
 
@@ -357,26 +801,27 @@ function updateConfigSpecs(cfg) {
   // 4. Polling Jitter Interval
   const specPolling = document.getElementById('specPolling');
   if (specPolling) {
-    specPolling.innerText = `~${((cfg.pollingIntervalMs || 1500) / 1000).toFixed(1)} Detik`;
+    const sfx = currentLang === 'en' ? 'Sec' : 'Detik';
+    specPolling.innerText = `~${((cfg.pollingIntervalMs || 1500) / 1000).toFixed(1)} ${sfx}`;
   }
 
   // 5. Emergency Stop Loss
   const specEmergencySl = document.getElementById('specEmergencySl');
   if (specEmergencySl) {
-    specEmergencySl.innerText = `${Number(cfg.emergencySlPct || 10).toFixed(0)}% Cut Loss`;
+    specEmergencySl.innerText = `${Number(cfg.emergencySlPct || 10).toFixed(0)}${t('spec_emergency_sl_suffix', '% Cut Loss')}`;
   }
 
   // 6. Leverage Synchronization
   const specLeverageSync = document.getElementById('specLeverageSync');
   if (specLeverageSync) {
-    specLeverageSync.innerText = cfg.syncLeverage !== false ? 'Otomatis' : 'Manual';
+    specLeverageSync.innerText = cfg.syncLeverage !== false ? t('spec_leverage_auto', 'Otomatis (Cross)') : t('spec_leverage_manual', 'Manual');
   }
 
   // 7. Simulation / Live Futures Badges
   const isSim = cfg.paperTrading !== false;
   const accountModeBadge = document.getElementById('accountModeBadge');
   if (accountModeBadge) {
-    accountModeBadge.innerText = isSim ? 'SIMULASI DEMO' : (cfg.isTestnet ? 'BINANCE TESTNET' : 'LIVE FUTURES');
+    accountModeBadge.innerText = isSim ? t('user_mode_sim', 'SIMULASI DEMO') : (cfg.isTestnet ? t('user_mode_testnet', 'BINANCE TESTNET') : t('user_mode_live', 'LIVE FUTURES'));
     accountModeBadge.className = `badge ${isSim ? 'badge-purple' : 'badge-cyan'}`;
   }
 
@@ -385,28 +830,38 @@ function updateConfigSpecs(cfg) {
       simBadge.style.background = 'rgba(59, 130, 246, 0.15)';
       simBadge.style.borderColor = 'rgba(59, 130, 246, 0.4)';
       simBadge.style.color = '#60a5fa';
-      simBadgeText.innerText = 'SIMULASI (FREE TRIAL)';
+      simBadgeText.innerText = t('sim_free_trial', 'SIMULASI (FREE TRIAL)');
     } else {
       simBadge.style.background = 'rgba(34, 197, 94, 0.15)';
       simBadge.style.borderColor = 'rgba(34, 197, 94, 0.4)';
       simBadge.style.color = '#22c55e';
-      simBadgeText.innerText = cfg.isTestnet ? 'BINANCE TESTNET' : 'LIVE BINANCE FUTURES';
+      simBadgeText.innerText = cfg.isTestnet ? t('sim_testnet', 'BINANCE TESTNET') : t('sim_live', 'LIVE BINANCE FUTURES');
     }
   }
 
   // 8. Proxy Status Badge
   if (cfg.proxy && cfg.proxy.enabled) {
-    proxyStatusBadge.innerText = `Proxy: Aktif (${cfg.proxy.host || 'OK'})`;
-    proxyStatusBadge.className = 'badge badge-green';
+    if (currentStatus?.lastError && (currentStatus.lastError.includes('403') || currentStatus.lastError.includes('IP_BLOCKED'))) {
+      proxyStatusBadge.innerText = t('proxy_blocked', 'Proxy: Terblokir (403)');
+      proxyStatusBadge.className = 'badge badge-red';
+    } else if (currentStatus?.lastError && (currentStatus.lastError.includes('407') || currentStatus.lastError.includes('AUTH'))) {
+      proxyStatusBadge.innerText = t('proxy_quota_out', 'Proxy: Kuota Habis (407)');
+      proxyStatusBadge.className = 'badge badge-red';
+    } else {
+      proxyStatusBadge.innerText = `${t('proxy_active', 'Proxy: Aktif')} (${cfg.proxy.host || 'OK'})`;
+      proxyStatusBadge.className = 'badge badge-green';
+    }
   } else {
-    proxyStatusBadge.innerText = 'Proxy: Nonaktif (Direct DoH)';
+    proxyStatusBadge.innerText = t('proxy_disabled', 'Proxy: Nonaktif (Direct DoH)');
     proxyStatusBadge.className = 'badge badge-purple';
   }
 }
 
 function updateTickData(payload) {
   if (payload.status) {
+    currentStatus = payload.status;
     updateEngineUI(payload.status);
+    if (currentConfig) updateConfigSpecs(currentConfig);
   }
 
   // Update Leader Card
@@ -442,6 +897,8 @@ function updateTickData(payload) {
 }
 
 function updateUserAccountUI(balance, positions) {
+  lastBalanceData = balance;
+  lastUserPositions = positions;
   if (typeof balance === 'number') {
     userWalletBalance.innerHTML = `$${formatNumber(balance)} <span class="currency">USDT</span>`;
     userAvailableBalance.innerText = `$${formatNumber(balance)}`;
@@ -459,12 +916,13 @@ function updateUserAccountUI(balance, positions) {
   }
 
   const count = positions ? positions.length : 0;
-  userOpenPositionsCount.innerText = `${count} Posisi`;
+  userOpenPositionsCount.innerText = `${count} ${t('user_positions_unit', 'Posisi')}`;
   const activeCountBadge = document.getElementById('activeCountBadge');
   if (activeCountBadge) activeCountBadge.innerText = count;
 }
 
 function renderPositionsTable(leaderPositions = [], userPositions = [], orders = [], positionShow = true) {
+  lastPositionsData = { leaderPositions, userPositions, orders, positionShow };
   const isPrivate = positionShow === false;
   const leaderList = Array.isArray(leaderPositions) ? leaderPositions : [];
   const userList = Array.isArray(userPositions) ? userPositions : [];
@@ -475,10 +933,10 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td colspan="8">
           <div class="empty-state">
             <i data-lucide="${isPrivate ? 'shield' : 'inbox'}" class="empty-icon ${isPrivate ? 'text-purple' : ''}"></i>
-            <p>${isPrivate ? '<b>Mode Privat Aktif pada Leader Ini</b>' : 'Leader saat ini belum memiliki posisi aktif terbuka.'}</p>
+            <p>${isPrivate ? `<b>${t('empty_private_title', 'Mode Privat Aktif pada Leader Ini')}</b>` : t('empty_open_title', 'Leader saat ini belum memiliki posisi aktif yang terbuka.')}</p>
             <small>${isPrivate 
-              ? 'Leader menyembunyikan tab Positions dari publik. <b>Bot otomatis membaca stream feed Latest Records</b> dan akan mengeksekusi order begitu Leader bertransaksi.' 
-              : 'Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.'}</small>
+              ? t('empty_private_desc', 'Leader menyembunyikan tab Positions dari publik. <b>Bot otomatis membaca stream feed Latest Records</b> dan akan mengeksekusi order begitu Leader bertransaksi.') 
+              : t('empty_open_desc', 'Bot akan otomatis membuka posisi begitu mendeteksi transaksi baru dari Leader.')}</small>
           </div>
         </td>
       </tr>
@@ -518,13 +976,13 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
 
     let syncBadge = '';
     if (lp && up) {
-      syncBadge = '<span class="badge badge-cyan">TERKONEKSI</span>';
+      syncBadge = `<span class="badge badge-cyan">${t('badge_connected', 'TERKONEKSI')}</span>`;
     } else if (up && !lp) {
       syncBadge = isPrivate 
-        ? '<span class="badge badge-cyan">AKTIF (STREAM)</span>' 
-        : '<span class="badge badge-yellow">MENUNGGU CLOSE</span>';
+        ? `<span class="badge badge-cyan">${t('badge_active_stream', 'AKTIF (STREAM)')}</span>` 
+        : `<span class="badge badge-yellow">${t('badge_waiting_close', 'MENUNGGU CLOSE')}</span>`;
     } else {
-      syncBadge = '<span class="badge badge-yellow">MENUNGGU SINKRON</span>';
+      syncBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>`;
     }
 
     const ratioDisplay = (up && lp && lp.amount > 0) 
@@ -533,7 +991,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
 
     const leaderVolDisplay = lp 
       ? `${formatNumber(lp.amount)} ${symbol.replace('USDT', '')}` 
-      : (isPrivate ? '<span class="text-dim">Privat</span>' : '--');
+      : (isPrivate ? `<span class="text-dim">${currentLang === 'en' ? 'Private' : 'Privat'}</span>` : '--');
 
     const leaderEntryDisplay = lp 
       ? `$${formatPrice(lp.entryPrice)}` 
@@ -544,7 +1002,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td><b>${symbol}</b> ${sideBadge} <span class="badge badge-purple">${leverage}x</span></td>
         <td>${leaderVolDisplay}</td>
         <td>${leaderEntryDisplay}</td>
-        <td>${up ? `${formatNumber(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : '<span class="text-muted">Belum ada</span>'}</td>
+        <td>${up ? `${formatNumber(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : `<span class="text-muted">${currentLang === 'en' ? 'None' : 'Belum ada'}</span>`}</td>
         <td>${up ? `$${formatPrice(up.entryPrice)}` : '--'}</td>
         <td>${ratioDisplay}</td>
         <td>
@@ -574,14 +1032,14 @@ function switchTableTab(tab) {
     if (tabBtnClosed) tabBtnClosed.classList.remove('active');
     if (viewActive) viewActive.style.display = 'block';
     if (viewClosed) viewClosed.style.display = 'none';
-    if (btnTableAction) btnTableAction.title = 'Segarkan Data';
+    if (btnTableAction) btnTableAction.title = t('refresh_tooltip', 'Segarkan Data');
     if (iconTableAction) iconTableAction.setAttribute('data-lucide', 'refresh-cw');
   } else {
     if (tabBtnActive) tabBtnActive.classList.remove('active');
     if (tabBtnClosed) tabBtnClosed.classList.add('active');
     if (viewActive) viewActive.style.display = 'none';
     if (viewClosed) viewClosed.style.display = 'block';
-    if (btnTableAction) btnTableAction.title = 'Hapus Riwayat Selesai';
+    if (btnTableAction) btnTableAction.title = t('clear_history_tooltip', 'Bersihkan Riwayat Trade Selesai');
     if (iconTableAction) iconTableAction.setAttribute('data-lucide', 'trash-2');
     renderClosedTradesTable();
   }
@@ -607,8 +1065,8 @@ function updateClosedTradesUI(trades) {
   let lossCount = 0;
   let totalRealizedPnl = 0;
 
-  for (const t of closedTradesList) {
-    const pnl = Number(t.realizedPnl) || 0;
+  for (const item of closedTradesList) {
+    const pnl = Number(item.realizedPnl) || 0;
     totalRealizedPnl += pnl;
     if (pnl > 0) winCount++;
     else if (pnl < 0) lossCount++;
@@ -644,8 +1102,8 @@ function renderClosedTradesTable() {
         <td colspan="9">
           <div class="empty-state">
             <i data-lucide="history" class="empty-icon"></i>
-            <p>Belum ada riwayat transaksi yang ditutup.</p>
-            <small>Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.</small>
+            <p>${t('empty_closed_title', 'Belum ada riwayat transaksi yang ditutup.')}</p>
+            <small>${t('empty_closed_desc', 'Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.')}</small>
           </div>
         </td>
       </tr>
@@ -655,47 +1113,47 @@ function renderClosedTradesTable() {
   }
 
   let html = '';
-  for (const t of closedTradesList) {
-    const pnl = Number(t.realizedPnl) || 0;
+  for (const item of closedTradesList) {
+    const pnl = Number(item.realizedPnl) || 0;
     const isWin = pnl >= 0;
     const pnlClass = isWin ? 'text-green' : 'text-red';
-    const sideBadgeClass = t.positionSide === 'LONG' ? 'badge-green' : 'badge-red';
+    const sideBadgeClass = item.positionSide === 'LONG' ? 'badge-green' : 'badge-red';
 
     let actionBadge = '';
-    if (t.action === 'FULL_CLOSE') {
-      actionBadge = '<span class="badge-action badge-action-full">Tutup Penuh</span>';
-    } else if (t.action === 'PARTIAL_CLOSE') {
-      actionBadge = '<span class="badge-action badge-action-partial">Tutup Parsial</span>';
-    } else if (t.action === 'EMERGENCY_SL') {
-      actionBadge = '<span class="badge-action badge-action-sl">Emergency SL</span>';
-    } else if (t.action === 'PANIC_CLOSE') {
-      actionBadge = '<span class="badge-action badge-action-panic">Panic Close</span>';
+    if (item.action === 'FULL_CLOSE') {
+      actionBadge = `<span class="badge-action badge-action-full">${t('badge_action_full', 'Tutup Penuh')}</span>`;
+    } else if (item.action === 'PARTIAL_CLOSE') {
+      actionBadge = `<span class="badge-action badge-action-partial">${t('badge_action_partial', 'Tutup Parsial')}</span>`;
+    } else if (item.action === 'EMERGENCY_SL') {
+      actionBadge = `<span class="badge-action badge-action-sl">${t('badge_action_sl', 'Emergency SL')}</span>`;
+    } else if (item.action === 'PANIC_CLOSE') {
+      actionBadge = `<span class="badge-action badge-action-panic">${t('badge_action_panic', 'Panic Close')}</span>`;
     } else {
-      actionBadge = `<span class="badge-action">${t.action}</span>`;
+      actionBadge = `<span class="badge-action">${item.action}</span>`;
     }
 
-    const modeBadge = t.isPaper 
-      ? '<span class="badge badge-purple" style="font-size: 0.65rem;">Simulasi</span>' 
-      : '<span class="badge badge-green" style="font-size: 0.65rem;">Live</span>';
+    const modeBadge = item.isPaper 
+      ? `<span class="badge badge-purple" style="font-size: 0.65rem;">${t('badge_sim', 'Simulasi')}</span>` 
+      : `<span class="badge badge-green" style="font-size: 0.65rem;">${t('badge_live', 'Live')}</span>`;
 
     html += `
       <tr>
-        <td style="color: var(--text-dim); font-size: 0.76rem;">${t.closedAt}</td>
+        <td style="color: var(--text-dim); font-size: 0.76rem;">${item.closedAt}</td>
         <td>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <strong>${t.symbol}</strong>
-            <span class="badge ${sideBadgeClass}" style="font-size: 0.68rem; padding: 1px 6px;">${t.positionSide}</span>
+            <strong>${item.symbol}</strong>
+            <span class="badge ${sideBadgeClass}" style="font-size: 0.68rem; padding: 1px 6px;">${item.positionSide}</span>
           </div>
         </td>
         <td>${actionBadge}</td>
-        <td>${t.qty}</td>
-        <td>$${formatPrice(t.entryPrice)}</td>
-        <td>$${formatPrice(t.closePrice)}</td>
+        <td>${item.qty}</td>
+        <td>$${formatPrice(item.entryPrice)}</td>
+        <td>$${formatPrice(item.closePrice)}</td>
         <td class="${pnlClass}" style="font-weight: 700;">
           ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT
         </td>
         <td class="${pnlClass}" style="font-weight: 600;">
-          ${(t.pnlPct || 0) >= 0 ? '+' : ''}${Number(t.pnlPct || 0).toFixed(2)}%
+          ${(item.pnlPct || 0) >= 0 ? '+' : ''}${Number(item.pnlPct || 0).toFixed(2)}%
         </td>
         <td>${modeBadge}</td>
       </tr>
@@ -708,10 +1166,10 @@ function renderClosedTradesTable() {
 
 async function clearClosedTrades() {
   if (closedTradesList.length === 0) {
-    alert('Riwayat transaksi selesai masih kosong.');
+    alert(t('alert_hist_empty', 'Riwayat transaksi selesai masih kosong.'));
     return;
   }
-  if (!confirm('Apakah Anda yakin ingin menghapus seluruh riwayat trade selesai?')) return;
+  if (!confirm(t('confirm_clear_hist', 'Apakah Anda yakin ingin menghapus seluruh riwayat trade selesai?'))) return;
   try {
     const res = await apiFetch('/api/clear-closed-trades', { method: 'POST' });
     const data = await res.json();
@@ -719,7 +1177,7 @@ async function clearClosedTrades() {
       closedTradesList = [];
       updateClosedTradesUI([]);
       appendLog('INFO', '🧹 Riwayat trade selesai telah dibersihkan.');
-      alert('✅ Riwayat trade selesai berhasil dibersihkan!');
+      alert(t('alert_clear_hist_success', '✅ Riwayat trade selesai berhasil dibersihkan!'));
     } else {
       alert(`Gagal menghapus riwayat: ${data.message}`);
     }
@@ -765,7 +1223,7 @@ async function toggleEngine() {
 }
 
 async function confirmPanicClose() {
-  const confirmed = confirm('APAKAH ANDA YAKIN?\n\nSemua posisi copy-trade yang sedang terbuka di akun Binance Anda akan ditutup seketika dengan order Market!');
+  const confirmed = confirm(t('confirm_panic_close', 'APAKAH ANDA YAKIN?\n\nSemua posisi copy-trade yang sedang terbuka di akun Binance Anda akan ditutup seketika dengan order Market!'));
   if (!confirmed) return;
 
   try {
@@ -877,7 +1335,7 @@ async function saveSettings() {
       currentConfig = data.config;
       updateConfigSpecs(currentConfig);
       closeSettingsModal();
-      appendLog('SUCCESS', 'Pengaturan berhasil disimpan!');
+      appendLog('SUCCESS', t('alert_settings_saved', 'Pengaturan berhasil disimpan!'));
       refreshData();
     } else {
       alert(`Gagal menyimpan pengaturan: ${data.message}`);
@@ -890,7 +1348,7 @@ async function saveSettings() {
 async function previewLeader() {
   const portfolioId = inputPortfolioId.value.trim();
   if (!portfolioId) {
-    alert('Masukkan Portfolio ID terlebih dahulu');
+    alert(t('alert_preview_need_id', 'Masukkan Portfolio ID terlebih dahulu'));
     return;
   }
 
@@ -911,8 +1369,15 @@ async function previewLeader() {
     });
     const data = await res.json();
     if (data.isSuccess) {
-      const privacyText = data.positionShow ? 'Publik (Positions Aktif)' : 'Privat (Auto Fallback ke Latest Records Stream)';
-      alert(`✅ BERHASIL TERHUBUNG KE BINANCE!\n\nNama Leader: ${data.nickname}\nModal Equity Leader: $${formatNumber(data.totalEquity)}\nROI 7D: ${data.roi7d}%\nFollowers: ${data.followerCount} / ${data.maxFollowerCount}\nStatus Privasi: ${privacyText}\nData Transaksi Ditemukan: ${data.orders?.length || 0} order terbaru`);
+      const isEn = currentLang === 'en';
+      const privacyText = data.positionShow 
+        ? (isEn ? 'Public (Active Positions)' : 'Publik (Positions Aktif)') 
+        : (isEn ? 'Private (Auto Fallback to Latest Records Stream)' : 'Privat (Auto Fallback ke Latest Records Stream)');
+      
+      const msg = isEn
+        ? `✅ SUCCESSFULLY CONNECTED TO BINANCE!\n\nLeader Name: ${data.nickname}\nLeader Margin/Equity: $${formatNumber(data.totalEquity)}\nROI 7D: ${data.roi7d}%\nFollowers: ${data.followerCount} / ${data.maxFollowerCount}\nPrivacy Status: ${privacyText}\nTrade Records Found: ${data.orders?.length || 0} latest orders`
+        : `✅ BERHASIL TERHUBUNG KE BINANCE!\n\nNama Leader: ${data.nickname}\nModal Equity Leader: $${formatNumber(data.totalEquity)}\nROI 7D: ${data.roi7d}%\nFollowers: ${data.followerCount} / ${data.maxFollowerCount}\nStatus Privasi: ${privacyText}\nData Transaksi Ditemukan: ${data.orders?.length || 0} order terbaru`;
+      alert(msg);
     } else {
       alert(`❌ Gagal mengambil data leader:\n${data.errorMessage}`);
     }
@@ -925,13 +1390,13 @@ async function testProxy() {
   const host = inputProxyHost.value.trim();
   const port = parseInt(inputProxyPort.value) || null;
   if (!host || !port) {
-    alert('Harap masukkan Host dan Port proxy terlebih dahulu sebelum menguji!');
+    alert(t('alert_test_proxy_need_host', 'Harap masukkan Host dan Port proxy terlebih dahulu sebelum menguji!'));
     return;
   }
 
   const btn = document.getElementById('btnTestProxy');
   btn.disabled = true;
-  btn.innerText = 'Menguji...';
+  btn.innerText = currentLang === 'en' ? 'Testing...' : 'Menguji...';
 
   try {
     const res = await apiFetch('/api/test-proxy', {
@@ -948,16 +1413,20 @@ async function testProxy() {
     });
     const data = await res.json();
     if (data.success) {
-      alert(`✅ PROXY AKTIF & VALID!\n\nPesan: ${data.message}\nLatency: ${data.latencyMs} ms`);
+      const isEn = currentLang === 'en';
+      alert(isEn 
+        ? `✅ PROXY ACTIVE & VALID!\n\nMessage: ${data.message}\nLatency: ${data.latencyMs} ms`
+        : `✅ PROXY AKTIF & VALID!\n\nPesan: ${data.message}\nLatency: ${data.latencyMs} ms`);
     } else {
-      alert(`❌ PROXY GAGAL:\n\n${data.message}`);
+      const isEn = currentLang === 'en';
+      alert(isEn ? `❌ PROXY FAILED:\n\n${data.message}` : `❌ PROXY GAGAL:\n\n${data.message}`);
     }
   } catch (err) {
     alert(`Error uji proxy: ${err.message}`);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i data-lucide="radio"></i> Uji Koneksi Proxy';
-    lucide.createIcons();
+    btn.innerHTML = `<i data-lucide="radio"></i> <span>${t('btn_test_proxy', 'Uji Koneksi Proxy')}</span>`;
+    lucide.createIcons({ root: btn });
   }
 }
 
@@ -985,7 +1454,7 @@ async function clearLogs() {
   terminalLogBox.innerHTML = `
     <div class="log-line log-info">
       <span class="log-time">[SYSTEM]</span>
-      <span class="log-msg">Log terminal telah dibersihkan.</span>
+      <span class="log-msg">${currentLang === 'en' ? 'Terminal logs cleared.' : 'Log terminal telah dibersihkan.'}</span>
     </div>
   `;
   try {
@@ -994,7 +1463,7 @@ async function clearLogs() {
 }
 
 async function resetDemoData() {
-  if (!confirm('Apakah Anda yakin ingin menghapus semua riwayat transaksi & posisi virtual demo?')) return;
+  if (!confirm(t('confirm_reset_demo', 'Apakah Anda yakin ingin menghapus semua riwayat transaksi & posisi virtual demo?'))) return;
   try {
     const res = await apiFetch('/api/reset-demo', { method: 'POST' });
     const data = await res.json();
@@ -1002,7 +1471,7 @@ async function resetDemoData() {
       terminalLogBox.innerHTML = `
         <div class="log-line log-info">
           <span class="log-time">[SYSTEM]</span>
-          <span class="log-msg">Data demo dan posisi virtual telah dibersihkan bersih.</span>
+          <span class="log-msg">${currentLang === 'en' ? 'Demo data and virtual positions have been cleared.' : 'Data demo dan posisi virtual telah dibersihkan bersih.'}</span>
         </div>
       `;
       positionsTableBody.innerHTML = `
@@ -1010,15 +1479,15 @@ async function resetDemoData() {
           <td colspan="9">
             <div class="empty-state">
               <i data-lucide="inbox" class="empty-icon"></i>
-              <p>Belum ada posisi yang disalin.</p>
-              <small>Data demo telah di-reset bersih.</small>
+              <p>${t('empty_open_title', 'Belum ada posisi yang disalin.')}</p>
+              <small>${currentLang === 'en' ? 'Demo data has been cleanly reset.' : 'Data demo telah di-reset bersih.'}</small>
             </div>
           </td>
         </tr>
       `;
-      lucide.createIcons();
+      lucide.createIcons({ root: positionsTableBody });
       fetchInitialData();
-      alert('✅ Data riwayat demo & posisi virtual telah dibersihkan!');
+      alert(t('alert_reset_demo_success', '✅ Data riwayat demo & posisi virtual telah dibersihkan!'));
     }
   } catch (err) {
     alert(`Gagal reset demo: ${err.message}`);

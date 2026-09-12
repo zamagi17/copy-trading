@@ -305,8 +305,36 @@ export class CopyTradeEngine {
     // 1. Fetch data posisi leader
     const leaderDetail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy);
     if (!leaderDetail.isSuccess) {
-      this.log('WARN', `Gagal fetch data leader: ${leaderDetail.errorMessage}`);
-      return;
+      this.lastError = leaderDetail.errorMessage || 'Gagal fetch data leader';
+
+      const isIpBlocked = leaderDetail.errorMessage?.includes('403');
+      const isQuotaOut = leaderDetail.errorMessage?.includes('407');
+      const isTimeout = leaderDetail.errorMessage?.includes('TIMEOUT') || leaderDetail.errorMessage?.includes('timeout');
+
+      if (isIpBlocked) {
+        this.log('ERROR', `🚨 [CRITICAL ALERT] IP PROXY DIBLOKIR BINANCE/CLOUDFLARE (HTTP 403)! Posisi akun Anda DIKUNCI AMAN (tidak akan ditutup). Harap segera ganti IP proxy di menu Pengaturan.`);
+      } else if (isQuotaOut) {
+        this.log('ERROR', `🚨 [CRITICAL ALERT] KUOTA PROXY HABIS / AUTENTIKASI GAGAL (HTTP 407)! Harap isi ulang kuota proxy Anda.`);
+      } else if (isTimeout) {
+        this.log('WARN', `⏳ Koneksi proxy timeout (>10 detik). Melewatkan tick ini demi keamanan.`);
+      } else {
+        this.log('WARN', `⚠️ Gagal fetch data leader: ${leaderDetail.errorMessage}`);
+      }
+
+      // Broadcast update ke UI dashboard agar indikator status error segera terlihat
+      if (this.wsBroadcaster) {
+        this.wsBroadcaster('TICK', {
+          status: this.getStatus(),
+        });
+      }
+
+      return; // SAFETY LOCK: Menghentikan eksekusi tick! Posisi akun Anda TIDAK AKAN DITUTUP SEMBARANGAN.
+    }
+
+    // Reset status error jika koneksi sukses pulih
+    if (this.lastError) {
+      this.log('SUCCESS', `✅ Koneksi ke Binance Copy Trading berhasil pulih kembali normal.`);
+      this.lastError = null;
     }
 
     this.lastLeaderEquity = leaderDetail.totalEquity || this.lastLeaderEquity;
