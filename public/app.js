@@ -209,7 +209,22 @@ const I18N = {
     label_telegram_chat_id: 'Telegram Chat ID / User ID:',
     placeholder_telegram_chat_id: 'Misal: 123456789',
     hint_telegram_chat_id: 'Ketik /start di @userinfobot untuk melihat Chat ID Anda.',
-    alert_test_telegram_need_inputs: 'Harap masukkan Bot Token dan Chat ID terlebih dahulu!'
+    alert_test_telegram_need_inputs: 'Harap masukkan Bot Token dan Chat ID terlebih dahulu!',
+
+    check_adaptive_polling: 'Aktifkan Polling Cerdas Berdasarkan Jam WIB (Smart Scheduling)',
+    hint_adaptive_polling_intro: 'Secara cerdas menyesuaikan kecepatan polling (1-3 detik) mengikuti kebiasaan buka posisi leader & volatilitas pasar New York/Asia.',
+    adaptive_panel_title: 'Jadwal Sesi Pasar WIB (UTC+7)',
+    session_dawn_title: 'Dini Hari – Subuh (Sesi New York)',
+    session_dawn_desc: 'Paling Agresif (~70% transaksi). Sering buka keranjang 3–5 koin.',
+    session_morning_title: 'Pagi Hari (Sesi Asia Tokyo/SG)',
+    session_morning_desc: 'Aktivitas Sedang (~15% transaksi). Lebih banyak averaging / tambah muatan.',
+    session_afternoon_title: 'Siang – Sore (Sesi Sepi)',
+    session_afternoon_desc: 'Paling Sepi (~9% transaksi). Pasar AS tutup. Hemat kuota proxy.',
+    session_night_title: 'Malam Hari (Pemanasan New York)',
+    session_night_desc: 'Awal Sesi London Sore / Wall Street. Pemanasan sebelum gelombang dini hari.',
+    label_session_interval: 'Kecepatan Polling:',
+    badge_current_wib: 'Waktu WIB:',
+    spec_polling_adaptive_prefix: 'Adaptif WIB'
   },
   en: {
     brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
@@ -401,7 +416,22 @@ const I18N = {
     label_telegram_chat_id: 'Telegram Chat ID / User ID:',
     placeholder_telegram_chat_id: 'e.g. 123456789',
     hint_telegram_chat_id: 'Type /start at @userinfobot to find your Chat ID.',
-    alert_test_telegram_need_inputs: 'Please enter Bot Token and Chat ID before testing!'
+    alert_test_telegram_need_inputs: 'Please enter Bot Token and Chat ID before testing!',
+
+    check_adaptive_polling: 'Enable Smart Adaptive Polling by WIB Hours (Smart Scheduling)',
+    hint_adaptive_polling_intro: 'Intelligently adapts polling speed (1-3s) based on leader trade patterns & New York/Asia session volatility.',
+    adaptive_panel_title: 'WIB Market Session Schedule (UTC+7)',
+    session_dawn_title: 'Dawn – Early Morning (New York Session)',
+    session_dawn_desc: 'Most Aggressive (~70% trades). Frequently opens 3–5 coins simultaneously.',
+    session_morning_title: 'Morning (Asia Session Tokyo/SG)',
+    session_morning_desc: 'Moderate (~15% trades). Averaging and increasing position weights.',
+    session_afternoon_title: 'Afternoon (Quiet Session)',
+    session_afternoon_desc: 'Quiet (~9% trades). US markets closed. Saves proxy bandwidth.',
+    session_night_title: 'Night (New York Warmup)',
+    session_night_desc: 'Late London / Wall Street opening. Warmup before late-night rush.',
+    label_session_interval: 'Polling Speed:',
+    badge_current_wib: 'Current WIB Time:',
+    spec_polling_adaptive_prefix: 'Adaptive WIB'
   }
 };
 
@@ -621,6 +651,18 @@ const checkIsTestnet = document.getElementById('checkIsTestnet');
 const checkTelegramEnabled = document.getElementById('checkTelegramEnabled');
 const inputTelegramToken = document.getElementById('inputTelegramToken');
 const inputTelegramChatId = document.getElementById('inputTelegramChatId');
+const checkAdaptivePolling = document.getElementById('checkAdaptivePolling');
+const staticPollingRow = document.getElementById('staticPollingRow');
+const adaptiveSchedulePanel = document.getElementById('adaptiveSchedulePanel');
+const selectDawnInterval = document.getElementById('selectDawnInterval');
+const selectMorningInterval = document.getElementById('selectMorningInterval');
+const selectAfternoonInterval = document.getElementById('selectAfternoonInterval');
+const selectNightInterval = document.getElementById('selectNightInterval');
+const currentWibBadge = document.getElementById('currentWibBadge');
+const cardSessionDawn = document.getElementById('cardSessionDawn');
+const cardSessionMorning = document.getElementById('cardSessionMorning');
+const cardSessionAfternoon = document.getElementById('cardSessionAfternoon');
+const cardSessionNight = document.getElementById('cardSessionNight');
 const inputCurrentPass = document.getElementById('inputCurrentPass');
 const inputNewPass = document.getElementById('inputNewPass');
 
@@ -900,6 +942,24 @@ function updateEngineUI(status) {
     toggleIcon.setAttribute('data-lucide', 'play');
   }
   lucide.createIcons({ root: btnToggleEngine });
+
+  // Update polling info in UI if available
+  if (status?.pollingInfo) {
+    const specPolling = document.getElementById('specPolling');
+    if (specPolling) {
+      const sfx = currentLang === 'en' ? 's' : 'Detik';
+      const sec = (status.pollingInfo.currentIntervalMs / 1000).toFixed(1);
+      if (status.pollingInfo.isAdaptive) {
+        const shortSession = status.pollingInfo.sessionName.split(' ')[0];
+        specPolling.innerText = `⚡ ~${sec}${sfx} (${shortSession})`;
+        specPolling.title = `Jadwal Sesi Aktif: ${status.pollingInfo.sessionName} (${status.pollingInfo.wibTimeStr}) - Interval: ~${sec} detik`;
+      } else {
+        specPolling.innerText = `~${sec} ${sfx}`;
+        specPolling.title = 'Interval Manual Tetap';
+      }
+    }
+    highlightActiveSession(status.pollingInfo.sessionKey, status.pollingInfo.wibTimeStr);
+  }
 }
 
 function updateConfigSpecs(cfg) {
@@ -931,8 +991,14 @@ function updateConfigSpecs(cfg) {
   // 4. Polling Jitter Interval
   const specPolling = document.getElementById('specPolling');
   if (specPolling) {
-    const sfx = currentLang === 'en' ? 'Sec' : 'Detik';
-    specPolling.innerText = `~${((cfg.pollingIntervalMs || 1500) / 1000).toFixed(1)} ${sfx}`;
+    const sfx = currentLang === 'en' ? 's' : 'Detik';
+    if (cfg.adaptivePolling?.enabled) {
+      specPolling.innerText = `⚡ ${t('spec_polling_adaptive_prefix', 'Adaptif WIB')}`;
+      specPolling.title = 'Jadwal Polling Cerdas Berdasarkan Sesi Pasar WIB Aktif';
+    } else {
+      specPolling.innerText = `~${((cfg.pollingIntervalMs || 1500) / 1000).toFixed(1)} ${sfx}`;
+      specPolling.title = 'Interval Manual Tetap';
+    }
   }
 
   // 5. Emergency Stop Loss
@@ -1417,9 +1483,18 @@ function openSettingsModal() {
   if (inputTelegramToken) inputTelegramToken.value = currentConfig.telegram?.botToken || '';
   if (inputTelegramChatId) inputTelegramChatId.value = currentConfig.telegram?.chatId || '';
 
+  // Adaptive Polling
+  const adp = currentConfig.adaptivePolling;
+  if (checkAdaptivePolling) checkAdaptivePolling.checked = adp?.enabled ?? true;
+  if (selectDawnInterval) selectDawnInterval.value = adp?.dawnIntervalMs || 1000;
+  if (selectMorningInterval) selectMorningInterval.value = adp?.morningIntervalMs || 1800;
+  if (selectAfternoonInterval) selectAfternoonInterval.value = adp?.afternoonIntervalMs || 3000;
+  if (selectNightInterval) selectNightInterval.value = adp?.nightIntervalMs || 1500;
+
   togglePaperTradingInputs();
   toggleProxyInputs();
   toggleTelegramInputs();
+  toggleAdaptivePollingInputs();
   settingsModal.style.display = 'flex';
 }
 
@@ -1446,6 +1521,48 @@ function toggleTelegramInputs() {
   if (row && checkTelegramEnabled) {
     row.style.opacity = checkTelegramEnabled.checked ? '1' : '0.5';
     row.style.pointerEvents = checkTelegramEnabled.checked ? 'auto' : 'none';
+  }
+}
+
+function highlightActiveSession(sessionKey, wibTimeStr) {
+  if (currentWibBadge && wibTimeStr) {
+    currentWibBadge.innerText = `${t('badge_current_wib', 'Waktu WIB:')} ${wibTimeStr}`;
+  }
+  const cards = {
+    dawn: cardSessionDawn,
+    morning: cardSessionMorning,
+    afternoon: cardSessionAfternoon,
+    night: cardSessionNight,
+  };
+  Object.keys(cards).forEach(k => {
+    if (cards[k]) {
+      if (k === sessionKey) {
+        cards[k].classList.add('active-session');
+      } else {
+        cards[k].classList.remove('active-session');
+      }
+    }
+  });
+}
+
+function toggleAdaptivePollingInputs() {
+  const isAdaptive = checkAdaptivePolling ? checkAdaptivePolling.checked : false;
+  if (staticPollingRow) staticPollingRow.style.display = isAdaptive ? 'none' : 'flex';
+  if (adaptiveSchedulePanel) adaptiveSchedulePanel.style.display = isAdaptive ? 'block' : 'none';
+  if (isAdaptive) {
+    const now = new Date();
+    const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const wibTime = new Date(utcMs + (7 * 3600000));
+    const hour = wibTime.getHours();
+    const minute = wibTime.getMinutes();
+    const hh = String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+    let sessionKey = 'dawn';
+    if (hour >= 0 && hour < 7) sessionKey = 'dawn';
+    else if (hour >= 7 && hour < 12) sessionKey = 'morning';
+    else if (hour >= 12 && hour < 19) sessionKey = 'afternoon';
+    else sessionKey = 'night';
+    highlightActiveSession(sessionKey, `${hh}:${mm} WIB`);
   }
 }
 
@@ -1493,6 +1610,13 @@ async function saveSettings() {
     portfolioId: inputPortfolioId.value.trim(),
     mode: selectMode.value,
     pollingIntervalMs: parseInt(selectPollingInterval.value) || 1500,
+    adaptivePolling: {
+      enabled: checkAdaptivePolling ? checkAdaptivePolling.checked : true,
+      dawnIntervalMs: selectDawnInterval ? parseInt(selectDawnInterval.value) : 1000,
+      morningIntervalMs: selectMorningInterval ? parseInt(selectMorningInterval.value) : 1800,
+      afternoonIntervalMs: selectAfternoonInterval ? parseInt(selectAfternoonInterval.value) : 3000,
+      nightIntervalMs: selectNightInterval ? parseInt(selectNightInterval.value) : 1500,
+    },
     ratioMultiplier: parseFloat(inputRatioMultiplier.value) || 1.0,
     fixedAmountUsdt: parseFloat(inputFixedAmount.value) || 25,
     maxModalPerCoin: parseFloat(inputMaxModalPerCoin.value) || 50,

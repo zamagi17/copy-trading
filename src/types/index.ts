@@ -12,6 +12,22 @@ export interface TelegramConfig {
   chatId: string;
 }
 
+export interface AdaptivePollingConfig {
+  enabled: boolean;
+  dawnIntervalMs: number;      // 00:00 - 06:59 WIB (Paling Agresif / Sesi NY)
+  morningIntervalMs: number;   // 07:00 - 11:59 WIB (Sedang / Sesi Asia)
+  afternoonIntervalMs: number; // 12:00 - 18:59 WIB (Paling Sepi / Hemat Kuota)
+  nightIntervalMs: number;     // 19:00 - 23:59 WIB (Pemanasan / Sesi London-NY)
+}
+
+export interface PollingStatusInfo {
+  isAdaptive: boolean;
+  currentIntervalMs: number;
+  sessionName: string;
+  sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' | 'manual';
+  wibTimeStr: string;
+}
+
 export interface AppConfig {
   portfolioId: string;
   copyTradeActive: boolean;
@@ -28,6 +44,7 @@ export interface AppConfig {
   syncLeverage: boolean;
   emergencySlPct: number;
   pollingIntervalMs: number;
+  adaptivePolling?: AdaptivePollingConfig;
   proxy: ProxyConfig;
   telegram?: TelegramConfig;
   adminPassword?: string;
@@ -114,6 +131,7 @@ export interface EngineStatus {
   userPositionsCount: number;
   activePairs: string[];
   lastError: string | null;
+  pollingInfo?: PollingStatusInfo;
 }
 
 export interface ClosedTrade {

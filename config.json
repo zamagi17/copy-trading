@@ -14,6 +14,13 @@
   "syncLeverage": true,
   "emergencySlPct": 80,
   "pollingIntervalMs": 1500,
+  "adaptivePolling": {
+    "enabled": true,
+    "dawnIntervalMs": 1000,
+    "morningIntervalMs": 1800,
+    "afternoonIntervalMs": 3000,
+    "nightIntervalMs": 1500
+  },
   "proxy": {
     "enabled": false,
     "host": "",

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 import { telegramService } from './telegram';
@@ -19,6 +19,7 @@ export class CopyTradeEngine {
   private pollCount: number = 0;
   private lastError: string | null = null;
   private lastProcessedOrderTime: number = 0;
+  private lastSessionKey: string = '';
   public virtualPositions: Map<string, UserPosition> = new Map();
   public virtualWalletBalance: number = 100;
   private closedTrades: ClosedTrade[] = [];
@@ -277,6 +278,69 @@ export class CopyTradeEngine {
     this.log('INFO', '🧹 Riwayat demo & posisi virtual telah di-reset bersih.');
   }
 
+  getCurrentPollingInfo(): PollingStatusInfo {
+    const now = new Date();
+    // UTC time + 7 hours for WIB
+    const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const wibTime = new Date(utcMs + (7 * 3600000));
+    const hour = wibTime.getHours();
+    const minute = wibTime.getMinutes();
+    const hh = String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+    const wibTimeStr = `${hh}:${mm} WIB`;
+
+    if (!this.config.adaptivePolling?.enabled) {
+      return {
+        isAdaptive: false,
+        currentIntervalMs: this.config.pollingIntervalMs || 1500,
+        sessionName: 'Manual (Tetap)',
+        sessionKey: 'manual',
+        wibTimeStr,
+      };
+    }
+
+    const cfg = this.config.adaptivePolling;
+    let intervalMs = 1500;
+    let sessionName = '';
+    let sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' = 'dawn';
+
+    if (hour >= 0 && hour < 7) {
+      // 00:00 - 06:59 WIB (Sesi New York / Paling Agresif - ~70% transaksi)
+      intervalMs = cfg.dawnIntervalMs || 1000;
+      sessionName = 'Dini Hari (New York Active - Agresif)';
+      sessionKey = 'dawn';
+    } else if (hour >= 7 && hour < 12) {
+      // 07:00 - 11:59 WIB (Sesi Asia Tokyo/Singapura - Sedang)
+      intervalMs = cfg.morningIntervalMs || 1800;
+      sessionName = 'Pagi (Sesi Asia - Sedang)';
+      sessionKey = 'morning';
+    } else if (hour >= 12 && hour < 19) {
+      // 12:00 - 18:59 WIB (Sesi Siang Asia / London Awal - Paling Sepi ~9% transaksi)
+      intervalMs = cfg.afternoonIntervalMs || 3000;
+      sessionName = 'Siang/Sore (Sesi Sepi - Hemat Kuota)';
+      sessionKey = 'afternoon';
+    } else {
+      // 19:00 - 23:59 WIB (Sesi London Sore / Awal New York - Pemanasan)
+      intervalMs = cfg.nightIntervalMs || 1500;
+      sessionName = 'Malam (Pemanasan New York)';
+      sessionKey = 'night';
+    }
+
+    // Log transisi jika berpindah sesi
+    if (this.lastSessionKey && this.lastSessionKey !== sessionKey) {
+      this.log('INFO', `⏰ [JADWAL ADAPTIF] Berganti ke Sesi ${sessionName} (${wibTimeStr}) - Kecepatan Polling: ${(intervalMs / 1000).toFixed(1)} detik`);
+    }
+    this.lastSessionKey = sessionKey;
+
+    return {
+      isAdaptive: true,
+      currentIntervalMs: intervalMs,
+      sessionName,
+      sessionKey,
+      wibTimeStr,
+    };
+  }
+
   getStatus(): EngineStatus {
     const userPositions = this.config.paperTrading
       ? Array.from(this.virtualPositions.values())
@@ -292,6 +356,7 @@ export class CopyTradeEngine {
       userPositionsCount: userPositions.length,
       activePairs: Array.from(this.lastLeaderPositions.keys()),
       lastError: this.lastError,
+      pollingInfo: this.getCurrentPollingInfo(),
     };
   }
 
@@ -302,7 +367,11 @@ export class CopyTradeEngine {
     this.config.copyTradeActive = true;
     this.saveConfig({ copyTradeActive: true });
     const modeTag = this.config.paperTrading ? '🧪 [MODE SIMULASI / PAPER TRADE]' : '🟢 [LIVE TRADING]';
-    this.log('SUCCESS', `🚀 Copy Trade Engine DIAKTIFKAN (${modeTag}) untuk Leader Portfolio: ${this.config.portfolioId}`);
+    const pollInfo = this.getCurrentPollingInfo();
+    const pollDesc = pollInfo.isAdaptive
+      ? `⚡ Polling Adaptif Cerdas WIB: Sesi ${pollInfo.sessionName} @ ${(pollInfo.currentIntervalMs / 1000).toFixed(1)}s (${pollInfo.wibTimeStr})`
+      : `⏱️ Polling Manual Tetap: ${(pollInfo.currentIntervalMs / 1000).toFixed(1)}s`;
+    this.log('SUCCESS', `🚀 Copy Trade Engine DIAKTIFKAN (${modeTag}) | ${pollDesc} untuk Leader: ${this.config.portfolioId}`);
     this.runLoop();
   }
 
@@ -329,7 +398,8 @@ export class CopyTradeEngine {
     }
 
     // Interval acak (jitter ~15%) untuk menghindari ritme kaku dan deteksi bot
-    const baseInterval = this.config.pollingIntervalMs || 1500;
+    const pollInfo = this.getCurrentPollingInfo();
+    const baseInterval = pollInfo.currentIntervalMs;
     const jitter = Math.floor(Math.random() * (baseInterval * 0.2)) - Math.floor(baseInterval * 0.1);
     const interval = Math.max(800, Math.round(baseInterval + jitter));
 

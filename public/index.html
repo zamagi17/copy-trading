@@ -395,8 +395,22 @@
           </div>
 
           <div class="form-row">
+            <div class="form-field checkbox-field" style="margin-top: 6px;">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkAdaptivePolling" onchange="toggleAdaptivePollingInputs()">
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #38bdf8;" data-i18n="check_adaptive_polling">Aktifkan Polling Cerdas Berdasarkan Jam WIB (Smart Scheduling)</span>
+              </label>
+              <small data-i18n="hint_adaptive_polling_intro" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                Secara cerdas menyesuaikan kecepatan polling (1-3 detik) mengikuti kebiasaan buka posisi leader & volatilitas pasar New York/Asia.
+              </small>
+            </div>
+          </div>
+
+          <!-- Static Polling Selection (shown when adaptive is OFF) -->
+          <div class="form-row" id="staticPollingRow">
             <div class="form-field">
-              <label for="selectPollingInterval" data-i18n="label_polling_interval">Kecepatan Pantau (Polling Interval):</label>
+              <label for="selectPollingInterval" data-i18n="label_polling_interval">Kecepatan Pantau Manual (Polling Interval):</label>
               <select id="selectPollingInterval">
                 <option value="1000" data-i18n="opt_poll_1000">⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)</option>
                 <option value="1500" data-i18n="opt_poll_1500">⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)</option>
@@ -405,6 +419,84 @@
                 <option value="3000" data-i18n="opt_poll_3000">🛡️ 3.0 Detik (Santai / Swing Trading)</option>
               </select>
               <small data-i18n="hint_polling_interval">Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).</small>
+            </div>
+          </div>
+
+          <!-- Adaptive Schedule Panel (shown when adaptive is ON) -->
+          <div class="adaptive-schedule-panel" id="adaptiveSchedulePanel" style="display: none;">
+            <div class="schedule-header">
+              <span class="schedule-title"><i data-lucide="clock"></i> <span data-i18n="adaptive_panel_title">Jadwal Sesi Pasar WIB (UTC+7)</span></span>
+              <span class="badge badge-sky" id="currentWibBadge">Waktu WIB: --:--</span>
+            </div>
+
+            <div class="schedule-grid">
+              <!-- Slot 1: Dini Hari (00:00 - 06:59 WIB) -->
+              <div class="session-card" id="cardSessionDawn">
+                <div class="session-card-header">
+                  <span class="session-badge badge-red">🌙 00:00 – 06:59 WIB</span>
+                  <h5 data-i18n="session_dawn_title">Dini Hari – Subuh (Sesi New York)</h5>
+                  <p class="session-desc" data-i18n="session_dawn_desc">Paling Agresif (~70% transaksi). Sering buka keranjang 3–5 koin.</p>
+                </div>
+                <div class="session-card-body">
+                  <label for="selectDawnInterval" data-i18n="label_session_interval">Kecepatan Polling:</label>
+                  <select id="selectDawnInterval">
+                    <option value="1000" selected>⚡ 1.0 Detik (Agresif Maksimal)</option>
+                    <option value="1200">⚡ 1.2 Detik (Sangat Cepat)</option>
+                    <option value="1500">⚡ 1.5 Detik (Cepat)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Slot 2: Pagi Hari (07:00 - 11:59 WIB) -->
+              <div class="session-card" id="cardSessionMorning">
+                <div class="session-card-header">
+                  <span class="session-badge badge-yellow">🌅 07:00 – 11:59 WIB</span>
+                  <h5 data-i18n="session_morning_title">Pagi Hari (Sesi Asia Tokyo/SG)</h5>
+                  <p class="session-desc" data-i18n="session_morning_desc">Aktivitas Sedang (~15% transaksi). Lebih banyak averaging / tambah muatan.</p>
+                </div>
+                <div class="session-card-body">
+                  <label for="selectMorningInterval" data-i18n="label_session_interval">Kecepatan Polling:</label>
+                  <select id="selectMorningInterval">
+                    <option value="1500">⚡ 1.5 Detik (Cepat)</option>
+                    <option value="1800" selected>⚖️ 1.8 Detik (Optimal Seimbang)</option>
+                    <option value="2000">⚖️ 2.0 Detik (Seimbang)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Slot 3: Siang - Sore (12:00 - 18:59 WIB) -->
+              <div class="session-card" id="cardSessionAfternoon">
+                <div class="session-card-header">
+                  <span class="session-badge badge-blue">☀️ 12:00 – 18:59 WIB</span>
+                  <h5 data-i18n="session_afternoon_title">Siang – Sore (Sesi Sepi)</h5>
+                  <p class="session-desc" data-i18n="session_afternoon_desc">Paling Sepi (~9% transaksi). Pasar AS tutup. Hemat kuota proxy.</p>
+                </div>
+                <div class="session-card-body">
+                  <label for="selectAfternoonInterval" data-i18n="label_session_interval">Kecepatan Polling:</label>
+                  <select id="selectAfternoonInterval">
+                    <option value="2500">🛡️ 2.5 Detik (Standar)</option>
+                    <option value="3000" selected>🛡️ 3.0 Detik (Hemat Kuota Proxy)</option>
+                    <option value="3500">🛡️ 3.5 Detik (Ultra Santai)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Slot 4: Malam Hari (19:00 - 23:59 WIB) -->
+              <div class="session-card" id="cardSessionNight">
+                <div class="session-card-header">
+                  <span class="session-badge badge-purple">🌆 19:00 – 23:59 WIB</span>
+                  <h5 data-i18n="session_night_title">Malam Hari (Pemanasan New York)</h5>
+                  <p class="session-desc" data-i18n="session_night_desc">Awal Sesi London Sore / Wall Street. Pemanasan sebelum gelombang dini hari.</p>
+                </div>
+                <div class="session-card-body">
+                  <label for="selectNightInterval" data-i18n="label_session_interval">Kecepatan Polling:</label>
+                  <select id="selectNightInterval">
+                    <option value="1200">⚡ 1.2 Detik (Sangat Cepat)</option>
+                    <option value="1500" selected>⚡ 1.5 Detik (Optimal Pemanasan)</option>
+                    <option value="1800">⚖️ 1.8 Detik (Seimbang)</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         </fieldset>
