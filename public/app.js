@@ -1,7 +1,10 @@
 // State variables
 const TOKEN_KEY = 'copytrader_jwt_token';
 const LANG_KEY = 'copytrader_lang';
+const SOUND_KEY = 'copytrader_sound';
 let currentLang = localStorage.getItem(LANG_KEY) || 'id';
+let isSoundEnabled = localStorage.getItem(SOUND_KEY) !== 'false';
+let previousUserPositionsCount = 0;
 let ws = null;
 let currentConfig = null;
 let currentStatus = null;
@@ -18,6 +21,8 @@ let lastUserPositions = null;
 const I18N = {
   id: {
     brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
+    sound_alert_title_on: 'Suara Notifikasi: Aktif (Klik untuk Mematikan)',
+    sound_alert_title_off: 'Suara Notifikasi: Senyap (Klik untuk Mengaktifkan)',
     sim_free_trial: 'SIMULASI (FREE TRIAL)',
     sim_testnet: 'BINANCE TESTNET',
     sim_live: 'LIVE BINANCE FUTURES',
@@ -193,10 +198,23 @@ const I18N = {
     alert_reset_demo_success: '✅ Data riwayat demo & posisi virtual telah dibersihkan!',
     alert_test_proxy_need_host: 'Harap masukkan Host dan Port proxy terlebih dahulu sebelum menguji!',
     alert_preview_need_id: 'Masukkan Portfolio ID terlebih dahulu',
-    alert_settings_saved: '✅ Pengaturan berhasil disimpan!'
+    alert_settings_saved: '✅ Pengaturan berhasil disimpan!',
+
+    legend_telegram: 'Notifikasi Bot Telegram ke HP',
+    check_telegram_enable: 'Aktifkan Notifikasi Telegram (Kirim alert order buka, TP/SL, dan status proxy ke HP)',
+    btn_test_telegram: 'Uji Kirim Pesan Telegram',
+    label_telegram_token: 'Telegram Bot Token:',
+    placeholder_telegram_token: 'Misal: 7123456789:AAH...',
+    hint_telegram_token: 'Dapatkan token bot dari @BotFather di Telegram.',
+    label_telegram_chat_id: 'Telegram Chat ID / User ID:',
+    placeholder_telegram_chat_id: 'Misal: 123456789',
+    hint_telegram_chat_id: 'Ketik /start di @userinfobot untuk melihat Chat ID Anda.',
+    alert_test_telegram_need_inputs: 'Harap masukkan Bot Token dan Chat ID terlebih dahulu!'
   },
   en: {
     brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
+    sound_alert_title_on: 'Sound Notifications: Active (Click to Mute)',
+    sound_alert_title_off: 'Sound Notifications: Muted (Click to Unmute)',
     sim_free_trial: 'SIMULATION (FREE TRIAL)',
     sim_testnet: 'BINANCE TESTNET',
     sim_live: 'LIVE BINANCE FUTURES',
@@ -372,7 +390,18 @@ const I18N = {
     alert_reset_demo_success: '✅ Demo history & virtual positions cleared successfully!',
     alert_test_proxy_need_host: 'Please enter proxy Host and Port before testing!',
     alert_preview_need_id: 'Please enter Portfolio ID first',
-    alert_settings_saved: '✅ Settings saved successfully!'
+    alert_settings_saved: '✅ Settings saved successfully!',
+
+    legend_telegram: 'Telegram Bot Notifications to Smartphone',
+    check_telegram_enable: 'Enable Telegram Notifications (Sends open/close orders, TP/SL, & proxy alerts to phone)',
+    btn_test_telegram: 'Test Telegram Message',
+    label_telegram_token: 'Telegram Bot Token:',
+    placeholder_telegram_token: 'e.g. 7123456789:AAH...',
+    hint_telegram_token: 'Get your bot token from @BotFather on Telegram.',
+    label_telegram_chat_id: 'Telegram Chat ID / User ID:',
+    placeholder_telegram_chat_id: 'e.g. 123456789',
+    hint_telegram_chat_id: 'Type /start at @userinfobot to find your Chat ID.',
+    alert_test_telegram_need_inputs: 'Please enter Bot Token and Chat ID before testing!'
   }
 };
 
@@ -438,6 +467,97 @@ function applyLanguage(lang) {
   if (currentTableTab === 'closed') {
     renderClosedTradesTable();
   }
+  initSoundUI();
+}
+
+// ==========================================
+// WEB AUDIO SOUND ALERT SYNTHESIZER
+// ==========================================
+let audioCtx = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass();
+    }
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+  return audioCtx;
+}
+
+function playTone(freq, type = 'sine', duration = 0.15, startTime = 0, gainLevel = 0.1) {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + startTime);
+
+    gain.gain.setValueAtTime(gainLevel, ctx.currentTime + startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + startTime + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(ctx.currentTime + startTime);
+    osc.stop(ctx.currentTime + startTime + duration);
+  } catch (e) {}
+}
+
+function playSound(soundType) {
+  if (!isSoundEnabled) return;
+  try {
+    if (soundType === 'open') {
+      // Pleasant bright pluck chord (C5 523Hz + G5 784Hz)
+      playTone(523.25, 'sine', 0.18, 0, 0.12);
+      playTone(783.99, 'triangle', 0.22, 0.06, 0.10);
+    } else if (soundType === 'win') {
+      // Victory ascending chime (C5 -> E5 -> G5 -> C6)
+      playTone(523.25, 'triangle', 0.14, 0, 0.12);
+      playTone(659.25, 'triangle', 0.14, 0.08, 0.12);
+      playTone(783.99, 'triangle', 0.16, 0.16, 0.14);
+      playTone(1046.50, 'sine', 0.35, 0.24, 0.15);
+    } else if (soundType === 'loss') {
+      // Soft minor alert (E4 329Hz -> C4 261Hz)
+      playTone(329.63, 'sine', 0.20, 0, 0.10);
+      playTone(261.63, 'sine', 0.30, 0.12, 0.09);
+    } else if (soundType === 'alert') {
+      // Urgent double beep (A5 880Hz)
+      playTone(880, 'square', 0.08, 0, 0.08);
+      playTone(880, 'square', 0.08, 0.12, 0.08);
+    }
+  } catch (e) {}
+}
+
+function initSoundUI() {
+  const box = document.getElementById('soundToggleBox');
+  const icon = document.getElementById('soundToggleIcon');
+  if (!box || !icon) return;
+
+  if (isSoundEnabled) {
+    box.classList.remove('muted');
+    box.title = t('sound_alert_title_on', 'Suara Notifikasi: Aktif (Klik untuk Mematikan)');
+    icon.setAttribute('data-lucide', 'bell');
+  } else {
+    box.classList.add('muted');
+    box.title = t('sound_alert_title_off', 'Suara Notifikasi: Senyap (Klik untuk Mengaktifkan)');
+    icon.setAttribute('data-lucide', 'bell-off');
+  }
+  lucide.createIcons({ root: box });
+}
+
+function toggleSoundAlert() {
+  isSoundEnabled = !isSoundEnabled;
+  localStorage.setItem(SOUND_KEY, isSoundEnabled ? 'true' : 'false');
+  initSoundUI();
+  if (isSoundEnabled) {
+    playSound('open');
+  }
 }
 
 // DOM Elements
@@ -498,6 +618,9 @@ const inputProxyPass = document.getElementById('inputProxyPass');
 const inputApiKey = document.getElementById('inputApiKey');
 const inputSecretKey = document.getElementById('inputSecretKey');
 const checkIsTestnet = document.getElementById('checkIsTestnet');
+const checkTelegramEnabled = document.getElementById('checkTelegramEnabled');
+const inputTelegramToken = document.getElementById('inputTelegramToken');
+const inputTelegramChatId = document.getElementById('inputTelegramChatId');
 const inputCurrentPass = document.getElementById('inputCurrentPass');
 const inputNewPass = document.getElementById('inputNewPass');
 
@@ -632,6 +755,7 @@ async function changeAdminPassword() {
 // ==========================================
 window.addEventListener('DOMContentLoaded', async () => {
   applyLanguage(currentLang);
+  initSoundUI();
   const token = getAuthToken();
   if (!token) {
     showLoginOverlay();
@@ -679,6 +803,7 @@ function connectWebSocket() {
         updateEngineUI(payload.status);
         updateConfigSpecs(payload.config);
         if (payload.user) {
+          previousUserPositionsCount = payload.user.positions ? payload.user.positions.length : 0;
           updateUserAccountUI(payload.user.balance, payload.user.positions);
           if (payload.user.closedTrades) {
             updateClosedTradesUI(payload.user.closedTrades);
@@ -693,6 +818,11 @@ function connectWebSocket() {
         closedTradesList.unshift(payload);
         if (closedTradesList.length > 250) closedTradesList.pop();
         updateClosedTradesUI(closedTradesList);
+        if (Number(payload.realizedPnl) >= 0) {
+          playSound('win');
+        } else {
+          playSound('loss');
+        }
       } else if (type === 'LOG') {
         appendLog(payload.level, payload.message, payload.timestamp);
       } else if (type === 'AUTH_ERROR') {
@@ -889,6 +1019,11 @@ function updateTickData(payload) {
 
   // Update User Account
   if (payload.user) {
+    const currentPositionsCount = payload.user.positions ? payload.user.positions.length : 0;
+    if (currentPositionsCount > previousUserPositionsCount && previousUserPositionsCount > 0) {
+      playSound('open');
+    }
+    previousUserPositionsCount = currentPositionsCount;
     updateUserAccountUI(payload.user.balance, payload.user.positions);
     if (payload.user.closedTrades) {
       updateClosedTradesUI(payload.user.closedTrades);
@@ -1277,8 +1412,14 @@ function openSettingsModal() {
   inputSecretKey.value = currentConfig.binanceSecretKey || '';
   checkIsTestnet.checked = currentConfig.isTestnet ?? false;
 
+  // Telegram
+  if (checkTelegramEnabled) checkTelegramEnabled.checked = currentConfig.telegram?.enabled ?? false;
+  if (inputTelegramToken) inputTelegramToken.value = currentConfig.telegram?.botToken || '';
+  if (inputTelegramChatId) inputTelegramChatId.value = currentConfig.telegram?.chatId || '';
+
   togglePaperTradingInputs();
   toggleProxyInputs();
+  toggleTelegramInputs();
   settingsModal.style.display = 'flex';
 }
 
@@ -1300,6 +1441,51 @@ function toggleProxyInputs() {
   row.style.pointerEvents = checkProxyEnabled.checked ? 'auto' : 'none';
 }
 
+function toggleTelegramInputs() {
+  const row = document.getElementById('telegramInputsRow');
+  if (row && checkTelegramEnabled) {
+    row.style.opacity = checkTelegramEnabled.checked ? '1' : '0.5';
+    row.style.pointerEvents = checkTelegramEnabled.checked ? 'auto' : 'none';
+  }
+}
+
+async function testTelegram() {
+  const botToken = inputTelegramToken ? inputTelegramToken.value.trim() : '';
+  const chatId = inputTelegramChatId ? inputTelegramChatId.value.trim() : '';
+
+  if (!botToken || !chatId) {
+    alert(t('alert_test_telegram_need_inputs', 'Harap masukkan Bot Token dan Chat ID terlebih dahulu!'));
+    return;
+  }
+
+  const btn = document.getElementById('btnTestTelegram');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = currentLang === 'en' ? 'Sending...' : 'Mengirim...';
+  }
+
+  try {
+    const res = await apiFetch('/api/test-telegram', {
+      method: 'POST',
+      body: JSON.stringify({ botToken, chatId }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ TELEGRAM TERKONEKSI!\n\n${data.message}\nLatency: ${data.latencyMs || 0} ms\n\nPeriksa aplikasi Telegram Anda untuk melihat pesan.`);
+    } else {
+      alert(`❌ GAGAL KIRIM TELEGRAM:\n\n${data.message}`);
+    }
+  } catch (err) {
+    alert(`Error uji telegram: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="send"></i> <span>${t('btn_test_telegram', 'Uji Kirim Pesan Telegram')}</span>`;
+      lucide.createIcons({ root: btn });
+    }
+  }
+}
+
 async function saveSettings() {
   const payload = {
     paperTrading: checkPaperTrading.checked,
@@ -1319,6 +1505,11 @@ async function saveSettings() {
       port: parseInt(inputProxyPort.value) || null,
       username: inputProxyUser.value.trim(),
       password: inputProxyPass.value.trim(),
+    },
+    telegram: {
+      enabled: checkTelegramEnabled ? checkTelegramEnabled.checked : false,
+      botToken: inputTelegramToken ? inputTelegramToken.value.trim() : '',
+      chatId: inputTelegramChatId ? inputTelegramChatId.value.trim() : '',
     },
     binanceApiKey: inputApiKey.value.trim(),
     binanceSecretKey: inputSecretKey.value.trim(),

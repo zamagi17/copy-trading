@@ -3,6 +3,7 @@ import path from 'path';
 import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
+import { telegramService } from './telegram';
 
 const CONFIG_PATH = path.resolve(__dirname, '../../config.json');
 const VIRTUAL_STATE_PATH = path.resolve(__dirname, '../../virtual_state.json');
@@ -28,7 +29,7 @@ export class CopyTradeEngine {
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
     this.loadVirtualState();
     this.loadTradeHistory();
-    this.initBinance();
+    this.initServices();
   }
 
   private saveVirtualState() {
@@ -111,6 +112,29 @@ export class CopyTradeEngine {
     if (this.wsBroadcaster) {
       this.wsBroadcaster('CLOSED_TRADE', fullTrade);
     }
+
+    // Kirim notifikasi Telegram saat posisi ditutup
+    const isWin = fullTrade.realizedPnl >= 0;
+    const emoji = isWin ? '🎯 [PROFIT]' : '🔻 [LOSS]';
+    const actionLabel = fullTrade.action === 'FULL_CLOSE'
+      ? 'Tutup Penuh'
+      : fullTrade.action === 'PARTIAL_CLOSE'
+      ? 'Tutup Parsial'
+      : fullTrade.action === 'EMERGENCY_SL'
+      ? 'Emergency Stop Loss'
+      : fullTrade.action === 'PANIC_CLOSE'
+      ? 'Panic Close All'
+      : fullTrade.action;
+
+    this.sendTelegram(
+      `${isWin ? '🟢' : '🔴'} <b>TRADE DITUTUP: ${emoji}</b>\n\n` +
+      `🪙 Simbol: <b>${fullTrade.symbol}</b> (${fullTrade.positionSide})\n` +
+      `⚡ Aksi: <b>${actionLabel}</b>\n` +
+      `💵 Entry: <b>$${fullTrade.entryPrice}</b> ➜ Exit: <b>$${fullTrade.closePrice}</b>\n` +
+      `💰 Realized PnL: <b>${fullTrade.realizedPnl >= 0 ? '+' : ''}$${fullTrade.realizedPnl} USDT (${fullTrade.pnlPct >= 0 ? '+' : ''}${fullTrade.pnlPct}%)</b>\n` +
+      `📦 Volume: <b>${fullTrade.qty}</b>\n` +
+      `🏷️ Mode: ${fullTrade.isPaper ? '🧪 Simulasi Demo' : '🟢 Live Futures'}`
+    );
   }
 
   setBroadcaster(fn: (type: string, payload: any) => void) {
@@ -184,7 +208,7 @@ export class CopyTradeEngine {
 
     try {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(this.config, null, 2), 'utf-8');
-      this.initBinance();
+      this.initServices();
       this.log('INFO', 'Pengaturan berhasil disimpan ke config.json');
     } catch (e: any) {
       this.log('ERROR', `Gagal menyimpan config.json: ${e.message}`);
@@ -196,8 +220,23 @@ export class CopyTradeEngine {
     return this.config;
   }
 
-  private initBinance() {
+  private initServices() {
     binanceClient.configure(this.config.binanceApiKey, this.config.binanceSecretKey, this.config.isTestnet);
+    telegramService.configure(this.config.telegram);
+  }
+
+  private lastTelegramAlertTime: { [key: string]: number } = {};
+
+  sendTelegram(text: string) {
+    telegramService.sendMessage(text).catch(() => {});
+  }
+
+  sendTelegramRateLimited(key: string, text: string, cooldownMs: number = 600000) {
+    const now = Date.now();
+    if (!this.lastTelegramAlertTime[key] || now - this.lastTelegramAlertTime[key] > cooldownMs) {
+      this.lastTelegramAlertTime[key] = now;
+      this.sendTelegram(text);
+    }
   }
 
   log(level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS', message: string) {
@@ -313,8 +352,10 @@ export class CopyTradeEngine {
 
       if (isIpBlocked) {
         this.log('ERROR', `🚨 [CRITICAL ALERT] IP PROXY DIBLOKIR BINANCE/CLOUDFLARE (HTTP 403)! Posisi akun Anda DIKUNCI AMAN (tidak akan ditutup). Harap segera ganti IP proxy di menu Pengaturan.`);
+        this.sendTelegramRateLimited('IP_BLOCKED', `🚨 <b>[CRITICAL ALERT] IP PROXY DIBLOKIR (HTTP 403)</b>\n\nBinance/Cloudflare memblokir IP proxy Anda. Posisi akun Anda telah DIKUNCI AMAN (tidak akan ditutup sembarangan). Harap segera perbarui IP proxy di dashboard.`);
       } else if (isQuotaOut) {
         this.log('ERROR', `🚨 [CRITICAL ALERT] KUOTA PROXY HABIS / AUTENTIKASI GAGAL (HTTP 407)! Harap isi ulang kuota proxy Anda.`);
+        this.sendTelegramRateLimited('QUOTA_OUT', `🚨 <b>[CRITICAL ALERT] KUOTA PROXY HABIS (HTTP 407)</b>\n\nKuota proxy DataImpulse Anda telah habis. Harap isi ulang kuota/bandwith proxy agar copy trade dapat berlanjut.`);
       } else if (isTimeout) {
         this.log('WARN', `⏳ Koneksi proxy timeout (>10 detik). Melewatkan tick ini demi keamanan.`);
       } else {
@@ -710,6 +751,16 @@ export class CopyTradeEngine {
       this.saveVirtualState();
       const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} @ $${markPrice} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${leaderPos.leverage || 10}x)`);
+      this.sendTelegram(
+        `🚀 <b>ORDER COPY TRADE DIBUKA [🧪 SIMULASI]</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+        `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `💵 Entry: <b>$${markPrice}</b>\n` +
+        `📦 Volume: <b>${targetQty}</b>\n` +
+        `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
+        `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
+        `👤 Target Leader: <code>${this.config.portfolioId}</code>`
+      );
       return;
     }
 
@@ -724,6 +775,17 @@ export class CopyTradeEngine {
       this.log('INFO', `🚀 Mengirim order MARKET: ${side} ${targetQty} ${leaderPos.symbol}...`);
       const orderRes = await binanceClient.placeMarketOrder(leaderPos.symbol, side, targetQty, false);
       this.log('SUCCESS', `✅ Order BERHASIL dieksekusi! ID: ${orderRes.orderId || 'OK'} (${side} ${targetQty} ${leaderPos.symbol})`);
+      const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
+      this.sendTelegram(
+        `🚀 <b>ORDER COPY TRADE DIBUKA [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+        `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `💵 Entry: <b>$${markPrice}</b>\n` +
+        `📦 Volume: <b>${targetQty}</b>\n` +
+        `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
+        `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
+        `👤 Target Leader: <code>${this.config.portfolioId}</code>`
+      );
     } catch (e: any) {
       this.log('ERROR', `❌ Gagal eksekusi order ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
     }

@@ -6,6 +6,12 @@ export interface ProxyConfig {
   password?: string;
 }
 
+export interface TelegramConfig {
+  enabled: boolean;
+  botToken: string;
+  chatId: string;
+}
+
 export interface AppConfig {
   portfolioId: string;
   copyTradeActive: boolean;
@@ -23,6 +29,7 @@ export interface AppConfig {
   emergencySlPct: number;
   pollingIntervalMs: number;
   proxy: ProxyConfig;
+  telegram?: TelegramConfig;
   adminPassword?: string;
   jwtSecret?: string;
 }

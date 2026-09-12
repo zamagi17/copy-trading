@@ -8,6 +8,7 @@ import { engine } from './services/engine';
 import { scraper } from './services/scraper';
 import { binanceClient } from './services/binance';
 import { AuthService } from './services/auth';
+import { telegramService } from './services/telegram';
 import { UserPosition, BalanceInfo } from './types';
 
 const app = express();
@@ -125,12 +126,17 @@ function maskConfig(cfg: any) {
   const copy = {
     ...cfg,
     proxy: cfg.proxy ? { ...cfg.proxy } : undefined,
+    telegram: cfg.telegram ? { ...cfg.telegram } : undefined,
   };
   if (copy.binanceSecretKey) {
     copy.binanceSecretKey = copy.binanceSecretKey.substring(0, 4) + '****************' + copy.binanceSecretKey.slice(-4);
   }
   if (copy.proxy?.password) {
     copy.proxy.password = '******';
+  }
+  if (copy.telegram?.botToken) {
+    const tok = copy.telegram.botToken;
+    copy.telegram.botToken = tok.length > 8 ? tok.substring(0, 5) + '****************' + tok.slice(-4) : '******';
   }
   delete copy.adminPassword;
   delete copy.jwtSecret;
@@ -220,6 +226,9 @@ app.post('/api/config', requireAuth, (req, res) => {
     if (incoming.proxy?.password && incoming.proxy.password.includes('****')) {
       incoming.proxy.password = current.proxy?.password;
     }
+    if (incoming.telegram?.botToken && incoming.telegram.botToken.includes('****')) {
+      incoming.telegram.botToken = current.telegram?.botToken;
+    }
 
     delete incoming.adminPassword; // Gunakan /api/auth/change-password untuk ubah password
     delete incoming.jwtSecret;
@@ -291,6 +300,28 @@ app.post('/api/test-proxy', requireAuth, async (req, res) => {
       proxy.password = current.proxy?.password || '';
     }
     const result = await scraper.testProxy(proxy, current.portfolioId);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/test-telegram', requireAuth, async (req, res) => {
+  try {
+    const current = engine.getConfig();
+    let botToken = req.body.botToken?.trim();
+    const chatId = req.body.chatId?.trim();
+
+    if (botToken && botToken.includes('****')) {
+      botToken = current.telegram?.botToken || '';
+    }
+
+    if (!botToken || !chatId) {
+      res.status(400).json({ success: false, message: 'Bot Token dan Chat ID wajib diisi!' });
+      return;
+    }
+
+    const result = await telegramService.testConnection(botToken, chatId);
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });

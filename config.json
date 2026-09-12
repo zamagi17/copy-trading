@@ -21,6 +21,11 @@
     "username": "",
     "password": ""
   },
+  "telegram": {
+    "enabled": false,
+    "botToken": "",
+    "chatId": ""
+  },
   "adminPassword": "admin123",
   "jwtSecret": "copytrade_secret_key_change_me_987"
 }

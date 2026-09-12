@@ -50,6 +50,11 @@
           <span class="lang-badge" id="langBadgeEn">EN</span>
         </div>
 
+        <!-- Audio Sound Alert Toggle -->
+        <div class="sound-toggle-box" id="soundToggleBox" onclick="toggleSoundAlert()" title="Suara Notifikasi: Aktif" data-i18n-title="sound_alert_title_on" role="button" tabindex="0">
+          <i data-lucide="bell" id="soundToggleIcon" class="sound-icon"></i>
+        </div>
+
         <div class="engine-badge badge-simulation" id="simBadge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
           <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>
           <span id="simBadgeText">SIMULASI (FREE TRIAL)</span>
@@ -500,7 +505,39 @@
           </div>
         </fieldset>
 
-        <!-- Tab 5: Keamanan & Password Admin -->
+        <!-- Tab 5: Notifikasi Telegram Bot -->
+        <fieldset class="form-group-fieldset" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.03);">
+          <legend style="color: #38bdf8;"><i data-lucide="send"></i> <span data-i18n="legend_telegram">Notifikasi Bot Telegram ke HP</span></legend>
+          <div class="form-row">
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkTelegramEnabled" onchange="toggleTelegramInputs()">
+                <span class="checkmark"></span>
+                <span style="font-weight: 600; color: #7dd3fc;" data-i18n="check_telegram_enable">Aktifkan Notifikasi Telegram (Kirim alert order buka, TP/SL, dan status proxy ke HP)</span>
+              </label>
+            </div>
+            <div class="form-field" style="justify-content: flex-end;">
+              <button type="button" class="btn btn-sm btn-info" id="btnTestTelegram" onclick="testTelegram()">
+                <i data-lucide="send"></i> <span data-i18n="btn_test_telegram">Uji Kirim Pesan Telegram</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row" id="telegramInputsRow">
+            <div class="form-field">
+              <label for="inputTelegramToken" data-i18n="label_telegram_token">Telegram Bot Token:</label>
+              <input type="password" id="inputTelegramToken" placeholder="Misal: 7123456789:AAH..." data-i18n-placeholder="placeholder_telegram_token">
+              <small data-i18n="hint_telegram_token">Dapatkan token bot dari <b>@BotFather</b> di Telegram.</small>
+            </div>
+            <div class="form-field">
+              <label for="inputTelegramChatId" data-i18n="label_telegram_chat_id">Telegram Chat ID / User ID:</label>
+              <input type="text" id="inputTelegramChatId" placeholder="Misal: 123456789" data-i18n-placeholder="placeholder_telegram_chat_id">
+              <small data-i18n="hint_telegram_chat_id">Ketik /start di <b>@userinfobot</b> untuk melihat Chat ID Anda.</small>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab 6: Keamanan & Password Admin -->
         <fieldset class="form-group-fieldset">
           <legend><i data-lucide="lock"></i> <span data-i18n="legend_security">Keamanan & Password Admin</span></legend>
           <div class="form-row">
