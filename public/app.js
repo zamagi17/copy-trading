@@ -851,6 +851,9 @@ function connectWebSocket() {
             updateClosedTradesUI(payload.user.closedTrades);
           }
         }
+        if (payload.leader) {
+          updateLeaderUI(payload.leader, payload.user?.positions || []);
+        }
         if (payload.logs) {
           payload.logs.reverse().forEach((l) => appendLog(l.level, l.message, l.timestamp));
         }
@@ -895,6 +898,10 @@ async function fetchInitialData() {
     const statusData = await statusRes.json();
     currentStatus = statusData.status;
     updateEngineUI(statusData.status);
+
+    if (statusData.leader) {
+      updateLeaderUI(statusData.leader, statusData.user?.positions || []);
+    }
 
     if (statusData.user) {
       updateUserAccountUI(statusData.user.balance, statusData.user.positions);
@@ -1053,6 +1060,28 @@ function updateConfigSpecs(cfg) {
   }
 }
 
+function updateLeaderUI(l, userPositions = []) {
+  if (!l) return;
+  if (l.nickname && leaderName) leaderName.innerText = l.nickname;
+  if (l.totalEquity && leaderEquityVal) leaderEquityVal.innerText = `${formatNumber(l.totalEquity)}`;
+  if (l.roi7d !== undefined && leaderRoiVal) {
+    leaderRoiVal.innerText = `${Number(l.roi7d) >= 0 ? '+' : ''}${Number(l.roi7d).toFixed(2)}%`;
+    leaderRoiVal.className = `metric-val ${Number(l.roi7d) >= 0 ? 'text-green' : 'text-red'}`;
+  }
+  if (l.mdd7d !== undefined && leaderMddVal) leaderMddVal.innerText = `${Number(l.mdd7d).toFixed(2)}%`;
+  if (l.followerCount !== undefined && leaderFollowersBadge) {
+    const isFull = l.maxFollowerCount && l.followerCount >= l.maxFollowerCount;
+    leaderFollowersBadge.innerText = `Followers: ${l.followerCount} / ${l.maxFollowerCount || 1000}${isFull ? ' (FULL)' : ''}`;
+    leaderFollowersBadge.className = `badge ${isFull ? 'badge-yellow' : 'badge-green'}`;
+  }
+  if (l.avatarUrl && leaderAvatar) {
+    leaderAvatar.innerHTML = `<img src="${l.avatarUrl}" alt="${l.nickname || 'Leader'}" style="width: 100%; height: 100%; border-radius: 12px; object-fit: cover;" />`;
+  }
+  if (Array.isArray(l.positions) || l.positionShow !== undefined) {
+    renderPositionsTable(l.positions || [], userPositions, l.orders || [], l.positionShow);
+  }
+}
+
 function updateTickData(payload) {
   if (payload.status) {
     currentStatus = payload.status;
@@ -1062,25 +1091,7 @@ function updateTickData(payload) {
 
   // Update Leader Card
   if (payload.leader) {
-    const l = payload.leader;
-    if (l.nickname) leaderName.innerText = l.nickname;
-    if (l.totalEquity) leaderEquityVal.innerText = `${formatNumber(l.totalEquity)}`;
-    if (l.roi7d !== undefined) {
-      leaderRoiVal.innerText = `${l.roi7d >= 0 ? '+' : ''}${l.roi7d.toFixed(2)}%`;
-      leaderRoiVal.className = `metric-val ${l.roi7d >= 0 ? 'text-green' : 'text-red'}`;
-    }
-    if (l.mdd7d !== undefined) leaderMddVal.innerText = `${l.mdd7d.toFixed(2)}%`;
-    if (l.followerCount !== undefined && leaderFollowersBadge) {
-      const isFull = l.maxFollowerCount && l.followerCount >= l.maxFollowerCount;
-      leaderFollowersBadge.innerText = `Followers: ${l.followerCount} / ${l.maxFollowerCount || 1000}${isFull ? ' (FULL)' : ''}`;
-      leaderFollowersBadge.className = `badge ${isFull ? 'badge-yellow' : 'badge-green'}`;
-    }
-    if (l.avatarUrl && leaderAvatar) {
-      leaderAvatar.innerHTML = `<img src="${l.avatarUrl}" alt="${l.nickname || 'Leader'}" style="width: 100%; height: 100%; border-radius: 12px; object-fit: cover;" />`;
-    }
-
-    // Render Table Perbandingan Posisi
-    renderPositionsTable(l.positions || [], payload.user?.positions || [], l.orders || [], l.positionShow);
+    updateLeaderUI(payload.leader, payload.user?.positions || []);
   }
 
   // Update User Account
@@ -1442,6 +1453,9 @@ async function refreshData() {
     const res = await apiFetch('/api/status');
     const data = await res.json();
     updateEngineUI(data.status);
+    if (data.leader) {
+      updateLeaderUI(data.leader, data.user?.positions || []);
+    }
     if (data.user) {
       updateUserAccountUI(data.user.balance, data.user.positions);
     }

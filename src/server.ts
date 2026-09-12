@@ -81,6 +81,7 @@ wss.on('connection', (ws, req) => {
     payload: {
       status: engine.getStatus(),
       config: maskConfig(cfg),
+      leader: engine.getLastLeaderDetail(),
       user: {
         balance: initUserBalance,
         positions: initUserPositions,
@@ -266,6 +267,7 @@ app.get('/api/status', requireAuth, async (req, res) => {
 
     res.json({
       status,
+      leader: engine.getLastLeaderDetail(),
       user: { balance: userBalance, positions: userPositions },
       logs: engine.getLogs(),
     });
@@ -383,4 +385,9 @@ server.listen(PORT, () => {
   console.log(`🔒 Sistem Autentikasi Admin: AKTIF`);
   console.log(`🔑 Password Default: admin123 (Dapat diubah di Settings)`);
   console.log(`======================================================\n`);
+
+  // Ambil snapshot data leader pertama kali saat server start
+  setTimeout(() => {
+    engine.fetchLeaderSnapshot().catch(() => {});
+  }, 1000);
 });

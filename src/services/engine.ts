@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 import { telegramService } from './telegram';
@@ -15,6 +15,7 @@ export class CopyTradeEngine {
   private pollTimeout: NodeJS.Timeout | null = null;
   private lastLeaderPositions: Map<string, LeadPosition> = new Map();
   private lastLeaderEquity: number = 0;
+  private lastLeaderDetail: LeadPortfolioDetail | null = null;
   private logs: LogEntry[] = [];
   private pollCount: number = 0;
   private lastError: string | null = null;
@@ -276,6 +277,41 @@ export class CopyTradeEngine {
       }
     } catch {}
     this.log('INFO', '🧹 Riwayat demo & posisi virtual telah di-reset bersih.');
+  }
+
+  getLastLeaderDetail(): LeadPortfolioDetail | null {
+    return this.lastLeaderDetail;
+  }
+
+  async fetchLeaderSnapshot(): Promise<LeadPortfolioDetail | null> {
+    if (!this.config.portfolioId) return null;
+    try {
+      const detail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy);
+      if (detail.isSuccess) {
+        this.lastLeaderDetail = detail;
+        this.lastLeaderEquity = detail.totalEquity;
+        if (this.wsBroadcaster) {
+          this.wsBroadcaster('TICK', {
+            status: this.getStatus(),
+            leader: {
+              nickname: detail.nickname,
+              avatarUrl: detail.avatarUrl,
+              totalEquity: detail.totalEquity,
+              roi7d: detail.roi7d,
+              mdd7d: detail.mdd7d,
+              winRate: detail.winRate,
+              followerCount: detail.followerCount,
+              maxFollowerCount: detail.maxFollowerCount,
+              positionShow: detail.positionShow,
+              positions: detail.positions || [],
+              orders: detail.orders || [],
+            },
+          });
+        }
+        return detail;
+      }
+    } catch {}
+    return null;
   }
 
   getCurrentPollingInfo(): PollingStatusInfo {
@@ -714,8 +750,9 @@ export class CopyTradeEngine {
       }
     }
 
-    // Update snapshot posisi leader
+    // Update snapshot posisi & data leader
     this.lastLeaderPositions = currentLeaderMap;
+    this.lastLeaderDetail = leaderDetail;
 
     // Broadcast update ke UI dashboard via WebSocket
     if (this.wsBroadcaster) {
@@ -723,10 +760,16 @@ export class CopyTradeEngine {
         status: this.getStatus(),
         leader: {
           nickname: leaderDetail.nickname,
+          avatarUrl: leaderDetail.avatarUrl,
           totalEquity: leaderDetail.totalEquity,
           roi7d: leaderDetail.roi7d,
           mdd7d: leaderDetail.mdd7d,
+          winRate: leaderDetail.winRate,
+          followerCount: leaderDetail.followerCount,
+          maxFollowerCount: leaderDetail.maxFollowerCount,
+          positionShow: leaderDetail.positionShow,
           positions: currentLeaderPositions,
+          orders: leaderDetail.orders || [],
         },
         user: {
           balance: userBalanceInfo,
