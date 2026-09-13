@@ -1697,7 +1697,7 @@ async function executeTestTrade() {
         testTradeAlertBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
         testTradeAlertBox.style.color = '#34d399';
         testTradeAlertBox.innerHTML = `<strong>✅ BERHASIL MASUK!</strong><br>${data.message}`;
-        playAudioNotification();
+        try { playSound('open'); } catch (e) {}
         handleTableAction();
       } else if (data.blockedByWeekend) {
         testTradeAlertBox.style.background = 'rgba(234, 179, 8, 0.15)';
