@@ -902,10 +902,15 @@ export class CopyTradeEngine {
 
   private async handleNewPosition(leaderPos: LeadPosition, userBalance: number, existingUserPos?: UserPosition) {
     // 0. Proteksi Mode Libur Akhir Pekan (Waktu China CST UTC+8)
+    const isAveragingDown = Boolean(existingUserPos && Math.abs(existingUserPos.positionAmt) > 0);
     const weekendStatus = this.getWeekendBreakStatus();
     if (this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
-      this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu China: ${weekendStatus.cstTimeStr}).`);
-      return;
+      if (isAveragingDown) {
+        this.log('INFO', `⚡ [LIBUR AKHIR PEKAN - AVG DOWN] Leader menambah muatan (Averaging Down) pada ${leaderPos.symbol} ${leaderPos.positionSide} yang SEDANG TERBUKA. Eksekusi penambahan posisi TETAP DILANJUTKAN untuk mengawal posisi aktif.`);
+      } else {
+        this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu China: ${weekendStatus.cstTimeStr}) dan akun belum memiliki posisi terbuka pada koin ini.`);
+        return;
+      }
     }
 
     if (!this.config.paperTrading && !binanceClient.isConfigured()) {
@@ -973,6 +978,16 @@ export class CopyTradeEngine {
         this.virtualPositions.set(posKey, existingUserPos);
         this.saveVirtualState();
         this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${targetQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
+        this.sendTelegram(
+          `➕ <b>ORDER AVERAGING DOWN [🧪 SIMULASI]</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+          `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+          `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+          `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
+          `📦 Tambahan Volume: <b>+${targetQty}</b> (Total: ${newQty.toFixed(4)})\n` +
+          `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+          `👤 Target Leader: <code>${this.config.portfolioId}</code>`
+        );
         return;
       }
 
@@ -1016,8 +1031,11 @@ export class CopyTradeEngine {
       const orderRes = await binanceClient.placeMarketOrder(leaderPos.symbol, side, targetQty, false);
       this.log('SUCCESS', `✅ Order BERHASIL dieksekusi! ID: ${orderRes.orderId || 'OK'} (${side} ${targetQty} ${leaderPos.symbol})`);
       const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
+      const title = isAveragingDown
+        ? 'ORDER AVERAGING DOWN [🟢 LIVE FUTURES]'
+        : 'ORDER COPY TRADE DIBUKA [🟢 LIVE FUTURES]';
       this.sendTelegram(
-        `🚀 <b>ORDER COPY TRADE DIBUKA [🟢 LIVE FUTURES]</b>\n\n` +
+        `🚀 <b>${title}</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
         `💵 Entry: <b>$${markPrice}</b>\n` +
@@ -1077,6 +1095,16 @@ export class CopyTradeEngine {
       this.virtualPositions.set(posKey, existingUserPos);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${addQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
+      this.sendTelegram(
+        `➕ <b>ORDER AVERAGING DOWN [🧪 SIMULASI]</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+        `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+        `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
+        `📦 Tambahan Volume: <b>+${addQty}</b> (Total: ${newQty.toFixed(4)})\n` +
+        `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+        `👤 Target Leader: <code>${this.config.portfolioId}</code>`
+      );
       return;
     }
 
@@ -1085,6 +1113,15 @@ export class CopyTradeEngine {
       this.log('INFO', `➕ Menambah posisi ${leaderPos.symbol} sebanyak ${addQty}...`);
       await binanceClient.placeMarketOrder(leaderPos.symbol, side, addQty, false);
       this.log('SUCCESS', `✅ Berhasil menambah posisi ${leaderPos.symbol} (+${addQty})`);
+      this.sendTelegram(
+        `➕ <b>ORDER AVERAGING DOWN [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+        `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `💵 Harga Pasar: <b>$${markPrice}</b>\n` +
+        `📦 Tambahan Volume: <b>+${addQty}</b>\n` +
+        `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+        `👤 Target Leader: <code>${this.config.portfolioId}</code>`
+      );
     } catch (e: any) {
       this.log('ERROR', `Gagal menambah posisi ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
     }
