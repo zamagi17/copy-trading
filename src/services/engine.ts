@@ -613,6 +613,7 @@ export class CopyTradeEngine {
       const isIpBlocked = leaderDetail.errorMessage?.includes('403');
       const isQuotaOut = leaderDetail.errorMessage?.includes('407');
       const isTimeout = leaderDetail.errorMessage?.includes('TIMEOUT') || leaderDetail.errorMessage?.includes('timeout');
+      const isSocketIdle = leaderDetail.errorMessage?.includes('socket hang up') || leaderDetail.errorMessage?.includes('PROXY_SOCKET_IDLE');
 
       if (isIpBlocked) {
         this.log('ERROR', `🚨 [CRITICAL ALERT] IP PROXY DIBLOKIR BINANCE/CLOUDFLARE (HTTP 403)! Posisi akun Anda DIKUNCI AMAN (tidak akan ditutup). Harap segera ganti IP proxy di menu Pengaturan.`);
@@ -621,7 +622,9 @@ export class CopyTradeEngine {
         this.log('ERROR', `🚨 [CRITICAL ALERT] KUOTA PROXY HABIS / AUTENTIKASI GAGAL (HTTP 407)! Harap isi ulang kuota proxy Anda.`);
         this.sendTelegramRateLimited('QUOTA_OUT', `🚨 <b>[CRITICAL ALERT] KUOTA PROXY HABIS (HTTP 407)</b>\n\nKuota proxy DataImpulse Anda telah habis. Harap isi ulang kuota/bandwith proxy agar copy trade dapat berlanjut.`);
       } else if (isTimeout) {
-        this.log('WARN', `⏳ Koneksi proxy timeout (>10 detik). Melewatkan tick ini demi keamanan.`);
+        this.log('WARN', `⏳ Koneksi proxy timeout (>15 detik). Melewatkan tick ini demi keamanan.`);
+      } else if (isSocketIdle) {
+        this.log('INFO', `🔄 Jalur socket proxy di-refresh (koneksi idle ditutup remote server saat standby).`);
       } else {
         this.log('WARN', `⚠️ Gagal fetch data leader: ${leaderDetail.errorMessage}`);
       }

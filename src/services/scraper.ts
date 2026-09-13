@@ -35,6 +35,7 @@ export class CopyTradeScraper {
   private detailCache: Map<string, { data: any; perf?: any; lastFetch: number }> = new Map();
   private cachedClient: AxiosInstance | null = null;
   private cachedClientKey: string = '';
+  private lastRequestTime: number = 0;
 
   private async createClient(proxy?: ProxyConfig): Promise<AxiosInstance> {
     let proxyHost = (proxy?.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -52,7 +53,15 @@ export class CopyTradeScraper {
       ? `proxy_${proxy?.username || ''}_${proxyHost}_${proxyPort}` 
       : 'direct_doh';
 
-    // REUSE existing persistent client & Keep-Alive socket!
+    // Jika jeda antar request > 20 detik (seperti mode standby libur 60s/120s),
+    // remote proxy/Cloudflare sudah memutus idle TCP connection (biasanya timeout 30-45s).
+    // Reset client agar tidak mencoba memakai socket basi yang memicu 'socket hang up'!
+    if (Date.now() - this.lastRequestTime > 20000) {
+      this.cachedClient = null;
+    }
+    this.lastRequestTime = Date.now();
+
+    // REUSE existing persistent client & Keep-Alive socket HANYA jika request cepat (< 20 detik)
     // Mencegah pembuatan TLS Handshake baru di setiap request (menghemat ~70% kuota proxy!)
     if (this.cachedClient && this.cachedClientKey === clientKey) {
       return this.cachedClient;
@@ -60,7 +69,7 @@ export class CopyTradeScraper {
 
     const config: AxiosRequestConfig = {
       baseURL: BASE_URL,
-      timeout: 10000,
+      timeout: isProxyActive ? 15000 : 10000,
       headers: {
         'User-Agent': CHROME_UA,
         'Accept': 'application/json, text/plain, */*',
@@ -345,6 +354,7 @@ export class CopyTradeScraper {
         isSuccess: true,
       };
     } catch (err: any) {
+      this.cachedClient = null; // Reset cached socket agar request berikutnya memakai koneksi baru
       let errorMsg = err.message || 'Gagal mengambil data leader';
       if (err.response?.status === 403 || err.message?.includes('403')) {
         errorMsg = 'IP_BLOCKED_403: Akses DITOLAK oleh Cloudflare / Binance (HTTP 403 Forbidden). IP Proxy Anda terdeteksi atau terblokir.';
@@ -353,9 +363,11 @@ export class CopyTradeScraper {
       } else if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
         errorMsg = 'PROXY_REFUSED: Koneksi ke server proxy ditolak (Connection Refused). Periksa Host dan Port proxy.';
       } else if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        errorMsg = 'PROXY_TIMEOUT: Koneksi ke proxy timeout (>10 detik). Server proxy lambat atau tidak merespons.';
+        errorMsg = 'PROXY_TIMEOUT: Koneksi ke proxy timeout (>15 detik). Server proxy lambat atau tidak merespons.';
       } else if (err.code === 'ENOTFOUND' || err.message?.includes('ENOTFOUND')) {
         errorMsg = 'PROXY_DNS_FAILED: Host proxy tidak ditemukan (DNS lookup failed).';
+      } else if (err.message?.includes('socket hang up') || err.code === 'ECONNRESET') {
+        errorMsg = 'PROXY_SOCKET_IDLE: Koneksi socket proxy diputus oleh remote server (idle timeout). Otomatis me-refresh socket baru.';
       }
 
       return {
