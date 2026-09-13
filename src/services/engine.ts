@@ -609,12 +609,19 @@ export class CopyTradeEngine {
       // Sinkronkan mark price & hitung floating PnL untuk posisi simulasi
       for (const [k, vp] of this.virtualPositions.entries()) {
         const lp = currentLeaderMap.get(k);
-        if (lp && lp.markPrice > 0) {
-          vp.markPrice = lp.markPrice;
+        let markPrice = lp && lp.markPrice > 0 ? lp.markPrice : 0;
+        if (!markPrice) {
+          try {
+            markPrice = await binanceClient.getSymbolPrice(vp.symbol);
+          } catch {}
+        }
+        if (markPrice > 0) {
+          vp.markPrice = markPrice;
           const qty = Math.abs(vp.positionAmt);
           vp.unRealizedProfit = vp.positionSide === 'LONG'
             ? (vp.markPrice - vp.entryPrice) * qty
             : (vp.entryPrice - vp.markPrice) * qty;
+          vp.notional = qty * markPrice;
         }
         totalUnrealizedProfit += (vp.unRealizedProfit || 0);
         usedMargin += ((Math.abs(vp.positionAmt) * (vp.entryPrice || 0)) / (vp.leverage || 10));

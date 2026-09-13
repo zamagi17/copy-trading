@@ -1322,7 +1322,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       : (up && isPrivate ? 'Stream' : '--');
 
     const leaderVolDisplay = lp 
-      ? `${formatNumber(lp.amount)} ${symbol.replace('USDT', '')}` 
+      ? `${formatQty(lp.amount)} ${symbol.replace('USDT', '')}` 
       : (isPrivate ? `<span class="text-dim">${currentLang === 'en' ? 'Private' : 'Privat'}</span>` : '--');
 
     const leaderEntryDisplay = lp 
@@ -1334,7 +1334,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td><b>${symbol}</b> ${sideBadge} <span class="badge badge-purple">${leverage}x</span></td>
         <td>${leaderVolDisplay}</td>
         <td>${leaderEntryDisplay}</td>
-        <td>${up ? `${formatNumber(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : `<span class="text-muted">${currentLang === 'en' ? 'None' : 'Belum ada'}</span>`}</td>
+        <td>${up ? `${formatQty(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : `<span class="text-muted">${currentLang === 'en' ? 'None' : 'Belum ada'}</span>`}</td>
         <td>${up ? `$${formatPrice(up.entryPrice)}` : '--'}</td>
         <td>${ratioDisplay}</td>
         <td>
@@ -1478,7 +1478,7 @@ function renderClosedTradesTable() {
           </div>
         </td>
         <td>${actionBadge}</td>
-        <td>${item.qty}</td>
+        <td>${formatQty(item.qty)}</td>
         <td>$${formatPrice(item.entryPrice)}</td>
         <td>$${formatPrice(item.closePrice)}</td>
         <td class="${pnlClass}" style="font-weight: 700;">
@@ -2008,6 +2008,22 @@ async function testProxy() {
 function formatNumber(num) {
   if (num === undefined || num === null || isNaN(num)) return '0.00';
   return Number(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatQty(num) {
+  if (num === undefined || num === null || isNaN(num)) return '0';
+  const val = Math.abs(Number(num));
+  if (val === 0) return '0';
+  if (val < 0.01) {
+    return val.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 6 });
+  }
+  if (val < 1) {
+    return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+  if (val < 1000) {
+    return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+  return val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function formatPrice(num) {
