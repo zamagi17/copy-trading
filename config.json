@@ -21,6 +21,12 @@
     "afternoonIntervalMs": 3000,
     "nightIntervalMs": 1500
   },
+  "weekendBreak": {
+    "enabled": true,
+    "timezone": "CST",
+    "standbyIntervalSec": 60,
+    "blockNewTrades": true
+  },
   "proxy": {
     "enabled": false,
     "host": "",

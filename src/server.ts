@@ -354,6 +354,21 @@ app.post('/api/panic-close', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/engine/test-order', requireAuth, async (req, res) => {
+  try {
+    const { symbol, positionSide, amountUsdt, bypassWeekend } = req.body;
+    const result = await engine.executeTestTrade({
+      symbol,
+      positionSide,
+      amountUsdt: amountUsdt ? parseFloat(amountUsdt) : undefined,
+      bypassWeekend: Boolean(bypassWeekend),
+    });
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 app.post('/api/clear-logs', requireAuth, (req, res) => {
   engine.clearLogs();
   res.json({ success: true, message: 'Log terminal telah dibersihkan.' });

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 import { telegramService } from './telegram';
@@ -21,6 +21,8 @@ export class CopyTradeEngine {
   private lastError: string | null = null;
   private lastProcessedOrderTime: number = 0;
   private lastSessionKey: string = '';
+  private lastUserPositionsCount: number = 0;
+  private isHolidayActive: boolean = false;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public virtualWalletBalance: number = 100;
   private closedTrades: ClosedTrade[] = [];
@@ -152,6 +154,14 @@ export class CopyTradeEngine {
         if (!parsed.jwtSecret) parsed.jwtSecret = Math.random().toString(36).substring(2) + Date.now().toString(36);
         if (parsed.paperTrading === undefined) parsed.paperTrading = true;
         if (parsed.virtualBalanceUsdt === undefined) parsed.virtualBalanceUsdt = 100;
+        if (!parsed.weekendBreak) {
+          parsed.weekendBreak = {
+            enabled: true,
+            timezone: 'CST',
+            standbyIntervalSec: 60,
+            blockNewTrades: true,
+          };
+        }
         return parsed;
       }
     } catch (e: any) {
@@ -174,6 +184,12 @@ export class CopyTradeEngine {
       syncLeverage: true,
       emergencySlPct: 10.0,
       pollingIntervalMs: 2500,
+      weekendBreak: {
+        enabled: true,
+        timezone: 'CST',
+        standbyIntervalSec: 60,
+        blockNewTrades: true,
+      },
       proxy: {
         enabled: false,
         host: '',
@@ -314,34 +330,108 @@ export class CopyTradeEngine {
     return null;
   }
 
-  getCurrentPollingInfo(): PollingStatusInfo {
+  /**
+   * Mengembalikan waktu China (CST, UTC+8) dan waktu WIB (UTC+7)
+   */
+  getTimes() {
     const now = new Date();
-    // UTC time + 7 hours for WIB
+    // UTC time
     const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const cstTime = new Date(utcMs + (8 * 3600000));
     const wibTime = new Date(utcMs + (7 * 3600000));
-    const hour = wibTime.getHours();
-    const minute = wibTime.getMinutes();
-    const hh = String(hour).padStart(2, '0');
-    const mm = String(minute).padStart(2, '0');
-    const wibTimeStr = `${hh}:${mm} WIB`;
 
+    const daysId = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+    const cstDay = cstTime.getDay(); // 0 = Minggu, 6 = Sabtu
+    const isWeekendCST = (cstDay === 0 || cstDay === 6);
+
+    const cstHh = String(cstTime.getHours()).padStart(2, '0');
+    const cstMm = String(cstTime.getMinutes()).padStart(2, '0');
+    const cstTimeStr = `${daysId[cstDay]}, ${cstHh}:${cstMm} CST`;
+
+    const wibDay = wibTime.getDay();
+    const wibHh = String(wibTime.getHours()).padStart(2, '0');
+    const wibMm = String(wibTime.getMinutes()).padStart(2, '0');
+    const wibTimeStr = `${daysId[wibDay]}, ${wibHh}:${wibMm} WIB`;
+
+    return {
+      cstTime,
+      wibTime,
+      cstDay,
+      isWeekendCST,
+      cstTimeStr,
+      wibTimeStr,
+      wibHour: wibTime.getHours(),
+      wibMinute: wibTime.getMinutes(),
+    };
+  }
+
+  getUserPositionsCount(): number {
+    if (this.config.paperTrading) {
+      return this.virtualPositions.size;
+    }
+    return this.lastUserPositionsCount;
+  }
+
+  getWeekendBreakStatus(overridePositionsCount?: number): WeekendBreakStatus {
+    const times = this.getTimes();
+    const isWeekend = times.isWeekendCST;
+    const cfg = this.config.weekendBreak;
+
+    const count = overridePositionsCount !== undefined ? overridePositionsCount : this.getUserPositionsCount();
+    const hasOpenPositions = count > 0;
+    const isHolidayActive = Boolean(cfg?.enabled && isWeekend && !hasOpenPositions);
+
+    return {
+      isWeekendCST: isWeekend,
+      hasOpenPositions,
+      isHolidayActive,
+      cstTimeStr: times.cstTimeStr,
+      wibTimeStr: times.wibTimeStr,
+      resumeTimeStr: 'Senin 00:00 CST (Minggu 23:00 WIB)',
+    };
+  }
+
+  getCurrentPollingInfo(): PollingStatusInfo {
+    const times = this.getTimes();
+    const weekendStatus = this.getWeekendBreakStatus();
+
+    // 1. Jika Mode Libur Akhir Pekan aktif (akhir pekan CST & tidak ada posisi terbuka)
+    if (weekendStatus.isHolidayActive) {
+      const standbySec = this.config.weekendBreak?.standbyIntervalSec || 60;
+      return {
+        isAdaptive: false,
+        currentIntervalMs: standbySec * 1000,
+        sessionName: '🌴 Libur Akhir Pekan (Standby CST)',
+        sessionKey: 'weekend_break',
+        wibTimeStr: times.wibTimeStr,
+        cstTimeStr: times.cstTimeStr,
+        isWeekendHoliday: true,
+      };
+    }
+
+    // 2. Jika Polling Adaptif tidak aktif
     if (!this.config.adaptivePolling?.enabled) {
       return {
         isAdaptive: false,
         currentIntervalMs: this.config.pollingIntervalMs || 1500,
         sessionName: 'Manual (Tetap)',
         sessionKey: 'manual',
-        wibTimeStr,
+        wibTimeStr: times.wibTimeStr,
+        cstTimeStr: times.cstTimeStr,
+        isWeekendHoliday: false,
       };
     }
 
+    // 3. Polling Adaptif Sesi Jam Pasar (WIB)
     const cfg = this.config.adaptivePolling;
+    const hour = times.wibHour;
     let intervalMs = 1500;
     let sessionName = '';
     let sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' = 'dawn';
 
     if (hour >= 0 && hour < 7) {
-      // 00:00 - 06:59 WIB (Sesi New York / Paling Agresif - ~70% transaksi)
+      // 00:00 - 06:59 WIB (Sesi New York / Paling Agresif)
       intervalMs = cfg.dawnIntervalMs || 1000;
       sessionName = 'Dini Hari (New York Active - Agresif)';
       sessionKey = 'dawn';
@@ -351,7 +441,7 @@ export class CopyTradeEngine {
       sessionName = 'Pagi (Sesi Asia - Sedang)';
       sessionKey = 'morning';
     } else if (hour >= 12 && hour < 19) {
-      // 12:00 - 18:59 WIB (Sesi Siang Asia / London Awal - Paling Sepi ~9% transaksi)
+      // 12:00 - 18:59 WIB (Sesi Siang Asia / London Awal - Sepi)
       intervalMs = cfg.afternoonIntervalMs || 3000;
       sessionName = 'Siang/Sore (Sesi Sepi - Hemat Kuota)';
       sessionKey = 'afternoon';
@@ -362,9 +452,14 @@ export class CopyTradeEngine {
       sessionKey = 'night';
     }
 
+    // Jika akhir pekan tapi masih ada posisi terbuka, berikan catatan status
+    if (weekendStatus.isWeekendCST && weekendStatus.hasOpenPositions) {
+      sessionName += ' (Mengawal Posisi Terbuka)';
+    }
+
     // Log transisi jika berpindah sesi
     if (this.lastSessionKey && this.lastSessionKey !== sessionKey) {
-      this.log('INFO', `⏰ [JADWAL ADAPTIF] Berganti ke Sesi ${sessionName} (${wibTimeStr}) - Kecepatan Polling: ${(intervalMs / 1000).toFixed(1)} detik`);
+      this.log('INFO', `⏰ [JADWAL ADAPTIF] Berganti ke Sesi ${sessionName} (${times.wibTimeStr}) - Kecepatan Polling: ${(intervalMs / 1000).toFixed(1)} detik`);
     }
     this.lastSessionKey = sessionKey;
 
@@ -373,7 +468,9 @@ export class CopyTradeEngine {
       currentIntervalMs: intervalMs,
       sessionName,
       sessionKey,
-      wibTimeStr,
+      wibTimeStr: times.wibTimeStr,
+      cstTimeStr: times.cstTimeStr,
+      isWeekendHoliday: false,
     };
   }
 
@@ -381,6 +478,9 @@ export class CopyTradeEngine {
     const userPositions = this.config.paperTrading
       ? Array.from(this.virtualPositions.values())
       : [];
+    const count = this.config.paperTrading ? this.virtualPositions.size : this.lastUserPositionsCount;
+    const weekendBreakStatus = this.getWeekendBreakStatus(count);
+
     return {
       isActive: this.isRunning,
       portfolioId: this.config.portfolioId,
@@ -393,6 +493,7 @@ export class CopyTradeEngine {
       activePairs: Array.from(this.lastLeaderPositions.keys()),
       lastError: this.lastError,
       pollingInfo: this.getCurrentPollingInfo(),
+      weekendBreak: weekendBreakStatus,
     };
   }
 
@@ -436,7 +537,9 @@ export class CopyTradeEngine {
     // Interval acak (jitter ~15%) untuk menghindari ritme kaku dan deteksi bot
     const pollInfo = this.getCurrentPollingInfo();
     const baseInterval = pollInfo.currentIntervalMs;
-    const jitter = Math.floor(Math.random() * (baseInterval * 0.2)) - Math.floor(baseInterval * 0.1);
+    const jitter = pollInfo.isWeekendHoliday
+      ? 0
+      : Math.floor(Math.random() * (baseInterval * 0.2)) - Math.floor(baseInterval * 0.1);
     const interval = Math.max(800, Math.round(baseInterval + jitter));
 
     if (this.isRunning) {
@@ -551,6 +654,23 @@ export class CopyTradeEngine {
     for (const up of userPositions) {
       const key = `${up.symbol}_${up.positionSide}`;
       userPositionsMap.set(key, up);
+    }
+    this.lastUserPositionsCount = userPositions.length;
+
+    // Evaluasi status Mode Libur Akhir Pekan (Waktu China CST UTC+8)
+    const weekendStatus = this.getWeekendBreakStatus(userPositions.length);
+    if (this.config.weekendBreak?.enabled) {
+      if (weekendStatus.isHolidayActive) {
+        if (!this.isHolidayActive) {
+          this.isHolidayActive = true;
+          this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Seluruh posisi bersih (0 posisi terbuka). Bot memasuki Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Polling dialihkan ke mode standby (${this.config.weekendBreak.standbyIntervalSec || 60}s) hingga ${weekendStatus.resumeTimeStr}.`);
+          this.sendTelegramRateLimited('WEEKEND_ENTER', `🌴 <b>[MODE LIBUR AKHIR PEKAN AKTIF]</b>\n\nSeluruh posisi akun Anda bersih (0 posisi terbuka).\nSesuai jadwal Waktu China (CST, UTC+8), bot beristirahat hemat kuota hingga <b>${weekendStatus.resumeTimeStr}</b>.`);
+        }
+      } else if (this.isHolidayActive && !weekendStatus.isWeekendCST) {
+        this.isHolidayActive = false;
+        this.log('SUCCESS', `🌅 [PASAR BUKA] Akhir pekan telah berakhir (Waktu China: ${weekendStatus.cstTimeStr}). Mode Libur Akhir Pekan selesai! Copy trade kembali aktif normal.`);
+        this.sendTelegramRateLimited('WEEKEND_EXIT', `🌅 <b>[COPY TRADE KEMBALI AKTIF]</b>\n\nAkhir pekan telah berakhir. Bot copy trade telah kembali aktif penuh memantau transaksi leader.`);
+      }
     }
 
     // 3. Deteksi Transaksi (Mendukung Public Positions & Private Positions / Latest Records)
@@ -781,6 +901,13 @@ export class CopyTradeEngine {
   }
 
   private async handleNewPosition(leaderPos: LeadPosition, userBalance: number, existingUserPos?: UserPosition) {
+    // 0. Proteksi Mode Libur Akhir Pekan (Waktu China CST UTC+8)
+    const weekendStatus = this.getWeekendBreakStatus();
+    if (this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
+      this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu China: ${weekendStatus.cstTimeStr}).`);
+      return;
+    }
+
     if (!this.config.paperTrading && !binanceClient.isConfigured()) {
       this.log('WARN', 'Lewati eksekusi: API Key Binance belum dikonfigurasi di dashboard.');
       return;
@@ -1126,6 +1253,117 @@ export class CopyTradeEngine {
     } catch (e: any) {
       this.log('ERROR', `Gagal melakukan panic close: ${e.message}`);
       throw e;
+    }
+  }
+
+  /**
+   * Mengeksekusi order uji coba (Test Trade) untuk memverifikasi apakah pesanan masuk
+   */
+  async executeTestTrade(params: {
+    symbol?: string;
+    positionSide?: 'LONG' | 'SHORT';
+    amountUsdt?: number;
+    bypassWeekend?: boolean;
+  }): Promise<{ success: boolean; message: string; blockedByWeekend?: boolean; isPaper?: boolean; position?: any; order?: any }> {
+    const symbol = (params.symbol || 'BTCUSDT').toUpperCase();
+    const positionSide: 'LONG' | 'SHORT' = params.positionSide === 'SHORT' ? 'SHORT' : 'LONG';
+    const bypassWeekend = Boolean(params.bypassWeekend);
+    const amountUsdt = params.amountUsdt && params.amountUsdt >= 5 ? params.amountUsdt : (this.config.fixedAmountUsdt || 25);
+
+    // 1. Validasi proteksi Libur Akhir Pekan (jika tidak dibypass)
+    if (!bypassWeekend) {
+      const weekendStatus = this.getWeekendBreakStatus();
+      if (this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
+        this.log('WARN', `🌴 [TEST ORDER DITOLAK] Order uji coba ${symbol} ${positionSide} diblokir oleh Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Sistem berjalan normal menolak order baru saat libur!`);
+        return {
+          success: false,
+          blockedByWeekend: true,
+          message: `Order uji coba ${symbol} ${positionSide} DITOLAK oleh Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Sistem bekerja dengan benar mengamankan akun dari trading akhir pekan! Centang opsi "Bypass Libur Akhir Pekan" jika ingin memaksa order masuk.`,
+        };
+      }
+    }
+
+    // 2. Ambil harga mark price & filter ukuran lot
+    let markPrice = await binanceClient.getSymbolPrice(symbol);
+    if (!markPrice || markPrice <= 0) {
+      markPrice = symbol.includes('BTC') ? 65000 : (symbol.includes('ETH') ? 3200 : 150);
+    }
+
+    const filter = await binanceClient.getSymbolFilter(symbol);
+    let targetQty = binanceClient.roundQuantity(amountUsdt / markPrice, filter.stepSize);
+    if (targetQty < filter.minQty) {
+      targetQty = filter.minQty;
+    }
+
+    // 3. Eksekusi sesuai mode (Simulasi / Live Binance)
+    if (this.config.paperTrading) {
+      const posKey = `${symbol}_${positionSide}`;
+      const userPos: UserPosition = {
+        symbol,
+        positionSide,
+        positionAmt: positionSide === 'LONG' ? targetQty : -targetQty,
+        entryPrice: markPrice,
+        markPrice,
+        unRealizedProfit: 0,
+        leverage: 10,
+        marginType: 'CROSSED',
+        notional: targetQty * markPrice,
+      };
+
+      this.virtualPositions.set(posKey, userPos);
+      this.saveVirtualState();
+      this.lastUserPositionsCount = this.virtualPositions.size;
+
+      const bypassNotice = bypassWeekend ? ' [BYPASS LIBUR]' : '';
+      this.log('SUCCESS', `🧪 [TEST ORDER SIMULASI]${bypassNotice} Posisi uji coba ${symbol} ${positionSide} BERHASIL MASUK (Vol: ${targetQty} koin @ $${markPrice})! Posisi aktif tercatat.`);
+
+      if (this.wsBroadcaster) {
+        this.wsBroadcaster('TICK', {
+          status: this.getStatus(),
+          user: {
+            balance: {
+              totalWalletBalance: this.virtualWalletBalance,
+              totalUnrealizedProfit: 0,
+              totalMarginBalance: this.virtualWalletBalance,
+              availableBalance: Math.max(0, this.virtualWalletBalance - (targetQty * markPrice / 10)),
+            },
+            positions: Array.from(this.virtualPositions.values()),
+            closedTrades: this.closedTrades,
+          },
+        });
+      }
+
+      return {
+        success: true,
+        isPaper: true,
+        message: `✅ Order uji coba ${symbol} ${positionSide} (${targetQty} koin @ $${markPrice}) berhasil masuk ke daftar Posisi Terbuka akun Anda!`,
+        position: userPos,
+      };
+    } else {
+      // Live Binance Futures
+      if (!binanceClient.isConfigured()) {
+        throw new Error('API Key dan Secret Key Binance belum dikonfigurasi di dashboard.');
+      }
+
+      try {
+        if (this.config.syncLeverage) {
+          await binanceClient.setLeverage(symbol, 10);
+        }
+        const side: 'BUY' | 'SELL' = positionSide === 'LONG' ? 'BUY' : 'SELL';
+        this.log('INFO', `🟢 Mengirim order uji coba real ke Binance: ${symbol} ${side} ${targetQty}...`);
+        const orderRes = await binanceClient.placeMarketOrder(symbol, side, targetQty, false, positionSide);
+        this.log('SUCCESS', `✅ [TEST ORDER LIVE] Order uji coba real ${symbol} ${side} BERHASIL MASUK ke Binance Futures! Order ID: ${orderRes.orderId}`);
+        return {
+          success: true,
+          isPaper: false,
+          message: `✅ Order uji coba real ${symbol} ${side} (${targetQty} koin) berhasil masuk ke Binance Futures! Order ID: ${orderRes.orderId}`,
+          order: orderRes,
+        };
+      } catch (err: any) {
+        const errMsg = err.response?.data?.msg || err.message;
+        this.log('ERROR', `Gagal eksekusi order uji coba di Binance: ${errMsg}`);
+        throw new Error(errMsg);
+      }
     }
   }
 }

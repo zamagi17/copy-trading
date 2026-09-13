@@ -344,6 +344,16 @@ body {
   box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
 }
 
+.btn-warning {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.25);
+}
+.btn-warning:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+}
+
 .btn-secondary {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-main);
@@ -1357,5 +1367,75 @@ button, .btn, .custom-checkbox, select, input {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   color: #f8fafc;
+}
+
+/* Weekend Holiday Styles */
+.badge-emerald {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.badge-holiday {
+  animation: pulseHoliday 2.5s infinite ease-in-out;
+}
+
+@keyframes pulseHoliday {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 14px 2px rgba(16, 185, 129, 0.3);
+  }
+}
+
+.weekend-holiday-panel {
+  transition: all 0.3s ease;
+  margin-top: 10px;
+}
+
+.weekend-info-card {
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.weekend-info-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.15);
+}
+
+.weekend-clock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 3px 9px;
+  border-radius: 14px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.weekend-clock-pill.wib {
+  color: #38bdf8;
+}
+
+.weekend-info-text {
+  font-size: 0.75rem;
+  color: #cbd5e1;
+  line-height: 1.5;
+  margin: 0;
 }
 

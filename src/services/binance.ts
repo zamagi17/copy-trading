@@ -256,6 +256,18 @@ export class BinanceFuturesClient {
     const side = currentSide === 'LONG' ? 'SELL' : 'BUY';
     return this.placeMarketOrder(symbol, side, quantity, true, currentSide);
   }
+
+  /**
+   * Mengambil harga mark price realtime publik dari Binance Futures
+   */
+  async getSymbolPrice(symbol: string): Promise<number> {
+    try {
+      const res = await axios.get(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol.toUpperCase()}`, { timeout: 6000 });
+      return parseFloat(res.data?.markPrice) || 0;
+    } catch {
+      return 0;
+    }
+  }
 }
 
 export const binanceClient = new BinanceFuturesClient();

@@ -224,7 +224,37 @@ const I18N = {
     session_night_desc: 'Awal Sesi London Sore / Wall Street. Pemanasan sebelum gelombang dini hari.',
     label_session_interval: 'Kecepatan Polling:',
     badge_current_wib: 'Waktu WIB:',
-    spec_polling_adaptive_prefix: 'Adaptif WIB'
+    spec_polling_adaptive_prefix: 'Adaptif WIB',
+
+    legend_weekend_break: 'Opsi Libur Akhir Pekan (Waktu China CST UTC+8)',
+    check_weekend_break: 'Aktifkan Libur Sabtu & Minggu (Waktu China CST UTC+8)',
+    hint_weekend_break_intro: 'Disesuaikan dengan lead trader China. Libur otomatis berlaku jika tidak ada posisi yang terbuka.',
+    weekend_info_explanation: 'Jadwal Libur: Jumat 23:00 WIB (Sabtu 00:00 CST) s/d Minggu 23:00 WIB (Senin 00:00 CST). Aturan Keamanan: Jika akhir pekan tiba namun akun masih memiliki posisi terbuka, bot tetap aktif mengawal hingga posisi tertutup. Begitu bersih (0 posisi), bot otomatis beristirahat & melambatkan polling.',
+    label_weekend_standby_interval: 'Interval Standby saat Libur (Hemat Kuota):',
+    opt_weekend_30: '⏱️ 30 Detik (Santai)',
+    opt_weekend_60: '🛡️ 60 Detik (Optimal Seimbang - Rekomendasi)',
+    opt_weekend_120: '🌙 120 Detik (Ultra Hemat Kuota Proxy)',
+    hint_weekend_standby_interval: 'Frekuensi heartbeat bot saat libur untuk menghemat kuota proxy dan resource server.',
+    check_block_weekend_trades: 'Abaikan Order Baru Leader Selama Akhir Pekan',
+    hint_block_weekend_trades: 'Menghindari buka posisi acak saat likuiditas pasar akhir pekan tipis.',
+    spec_weekend_label: 'Libur Akhir Pekan:',
+    spec_weekend_active: 'Aktif (Waktu China)',
+    spec_weekend_disabled: 'Nonaktif (24/7)',
+    status_weekend_holiday: 'LIBUR AKHIR PEKAN (CST)',
+    status_weekend_pending: 'MENUNGGU TUTUP POSISI',
+    badge_current_cst: 'China CST:',
+
+    btn_test_trade: 'Uji Eksekusi',
+    btn_test_trade_title: 'Uji Coba Eksekusi Order',
+    test_trade_modal_title: 'Uji Eksekusi Order (Test Trade)',
+    test_trade_intro: 'Gunakan fitur ini untuk menguji apakah order berhasil dieksekusi dan masuk ke dalam sistem / Binance secara tepat.',
+    label_test_symbol: 'Pilih Simbol Koin:',
+    label_test_side: 'Arah Posisi (Side):',
+    label_test_amount: 'Nominal Modal Uji Coba (USDT):',
+    hint_test_amount: 'Nominal margin USDT untuk membuka posisi uji coba ini.',
+    check_bypass_weekend: 'Bypass Libur Akhir Pekan',
+    hint_bypass_weekend: 'Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan CST menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.',
+    btn_run_test_trade: 'Eksekusi Order Uji Coba'
   },
   en: {
     brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
@@ -431,7 +461,37 @@ const I18N = {
     session_night_desc: 'Late London / Wall Street opening. Warmup before late-night rush.',
     label_session_interval: 'Polling Speed:',
     badge_current_wib: 'Current WIB Time:',
-    spec_polling_adaptive_prefix: 'Adaptive WIB'
+    spec_polling_adaptive_prefix: 'Adaptive WIB',
+
+    legend_weekend_break: 'Weekend Holiday Mode (China CST Time UTC+8)',
+    check_weekend_break: 'Enable Saturday & Sunday Holiday (China CST Time UTC+8)',
+    hint_weekend_break_intro: 'Synchronized with China lead traders. Automatically pauses only when there are NO open positions.',
+    weekend_info_explanation: 'Holiday Schedule: Friday 23:00 WIB (Saturday 00:00 CST) until Sunday 23:00 WIB (Monday 00:00 CST). Safety Rule: If positions are still open during the weekend, the bot remains active to guard them until closed. Once clear (0 positions), it enters holiday standby and slows polling.',
+    label_weekend_standby_interval: 'Standby Polling Interval during Holiday:',
+    opt_weekend_30: '⏱️ 30 Seconds (Relaxed)',
+    opt_weekend_60: '🛡️ 60 Seconds (Optimal Balance - Recommended)',
+    opt_weekend_120: '🌙 120 Seconds (Ultra Bandwidth Saver)',
+    hint_weekend_standby_interval: 'Heartbeat interval during holiday to save residential proxy quota and server resources.',
+    check_block_weekend_trades: 'Ignore New Leader Orders During Weekend',
+    hint_block_weekend_trades: 'Avoids entering erratic weekend trades when market liquidity is low.',
+    spec_weekend_label: 'Weekend Holiday:',
+    spec_weekend_active: 'Active (China Time)',
+    spec_weekend_disabled: 'Disabled (24/7)',
+    status_weekend_holiday: 'WEEKEND HOLIDAY (CST)',
+    status_weekend_pending: 'WAITING POSITION CLOSE',
+    badge_current_cst: 'China CST Time:',
+
+    btn_test_trade: 'Test Trade',
+    btn_test_trade_title: 'Test Order Execution',
+    test_trade_modal_title: 'Test Order Execution (Test Trade)',
+    test_trade_intro: 'Use this feature to test whether orders execute and enter the system / Binance properly.',
+    label_test_symbol: 'Select Coin Symbol:',
+    label_test_side: 'Position Side:',
+    label_test_amount: 'Test Margin Amount (USDT):',
+    hint_test_amount: 'USDT margin amount to open this test position.',
+    check_bypass_weekend: 'Bypass Weekend Holiday',
+    hint_bypass_weekend: 'If unchecked, tests whether the China CST weekend holiday rule blocks orders during weekend. If checked, forces order entry to test the position table.',
+    btn_run_test_trade: 'Execute Test Order'
   }
 };
 
@@ -665,6 +725,28 @@ const cardSessionAfternoon = document.getElementById('cardSessionAfternoon');
 const cardSessionNight = document.getElementById('cardSessionNight');
 const inputCurrentPass = document.getElementById('inputCurrentPass');
 const inputNewPass = document.getElementById('inputNewPass');
+
+// Weekend Holiday DOMs
+const holidayBadge = document.getElementById('holidayBadge');
+const holidayBadgeText = document.getElementById('holidayBadgeText');
+const specWeekendBreak = document.getElementById('specWeekendBreak');
+const currentCstBadge = document.getElementById('currentCstBadge');
+const checkWeekendBreak = document.getElementById('checkWeekendBreak');
+const weekendBreakInputsRow = document.getElementById('weekendBreakInputsRow');
+const selectWeekendStandbyInterval = document.getElementById('selectWeekendStandbyInterval');
+const checkBlockWeekendNewTrades = document.getElementById('checkBlockWeekendNewTrades');
+const weekendModalCstClock = document.getElementById('weekendModalCstClock');
+const weekendModalWibClock = document.getElementById('weekendModalWibClock');
+const weekendModalStatusBadge = document.getElementById('weekendModalStatusBadge');
+
+// Test Trade DOMs
+const testTradeModal = document.getElementById('testTradeModal');
+const selectTestSymbol = document.getElementById('selectTestSymbol');
+const selectTestSide = document.getElementById('selectTestSide');
+const inputTestAmount = document.getElementById('inputTestAmount');
+const checkBypassWeekend = document.getElementById('checkBypassWeekend');
+const testTradeAlertBox = document.getElementById('testTradeAlertBox');
+const btnExecuteTestTrade = document.getElementById('btnExecuteTestTrade');
 
 // ==========================================
 // AUTHENTICATION & API HELPERS
@@ -950,6 +1032,33 @@ function updateEngineUI(status) {
   }
   lucide.createIcons({ root: btnToggleEngine });
 
+  // Update Weekend Holiday Badge in Header
+  if (holidayBadge && status?.weekendBreak) {
+    const wb = status.weekendBreak;
+    if (wb.isHolidayActive && isEngineActive) {
+      holidayBadge.style.display = 'flex';
+      holidayBadge.style.background = 'rgba(16, 185, 129, 0.15)';
+      holidayBadge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+      holidayBadge.style.color = '#34d399';
+      if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_holiday', 'LIBUR AKHIR PEKAN (CST)');
+      holidayBadge.title = `Mode Libur Aktif (${wb.cstTimeStr}). Standby polling aktif. Buka kembali: ${wb.resumeTimeStr}`;
+    } else if (wb.isWeekendCST && wb.hasOpenPositions && isEngineActive) {
+      holidayBadge.style.display = 'flex';
+      holidayBadge.style.background = 'rgba(234, 179, 8, 0.15)';
+      holidayBadge.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+      holidayBadge.style.color = '#fde047';
+      if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_pending', 'MENUNGGU TUTUP POSISI');
+      holidayBadge.title = `Akhir pekan Waktu China, bot tetap aktif mengawal posisi terbuka sebelum libur.`;
+    } else {
+      holidayBadge.style.display = 'none';
+    }
+  }
+
+  // Update CST clock in schedule panel header
+  if (currentCstBadge && status?.weekendBreak?.cstTimeStr) {
+    currentCstBadge.innerText = `${t('badge_current_cst', 'China CST:')} ${status.weekendBreak.cstTimeStr}`;
+  }
+
   // Update polling info in UI if available
   if (status?.pollingInfo) {
     const specPolling = document.getElementById('specPolling');
@@ -1057,6 +1166,17 @@ function updateConfigSpecs(cfg) {
   } else {
     proxyStatusBadge.innerText = t('proxy_disabled', 'Proxy: Nonaktif (Direct DoH)');
     proxyStatusBadge.className = 'badge badge-purple';
+  }
+
+  // 9. Weekend Break Mode Spec
+  if (specWeekendBreak) {
+    if (cfg.weekendBreak?.enabled !== false) {
+      specWeekendBreak.innerText = t('spec_weekend_active', 'Aktif (Waktu China)');
+      specWeekendBreak.className = 'spec-value text-green';
+    } else {
+      specWeekendBreak.innerText = t('spec_weekend_disabled', 'Nonaktif (24/7)');
+      specWeekendBreak.className = 'spec-value text-muted';
+    }
   }
 }
 
@@ -1505,15 +1625,107 @@ function openSettingsModal() {
   if (selectAfternoonInterval) selectAfternoonInterval.value = adp?.afternoonIntervalMs || 3000;
   if (selectNightInterval) selectNightInterval.value = adp?.nightIntervalMs || 1500;
 
+  // Weekend Break (Waktu China CST)
+  const wb = currentConfig.weekendBreak;
+  if (checkWeekendBreak) checkWeekendBreak.checked = wb?.enabled ?? true;
+  if (selectWeekendStandbyInterval) selectWeekendStandbyInterval.value = wb?.standbyIntervalSec || 60;
+  if (checkBlockWeekendNewTrades) checkBlockWeekendNewTrades.checked = wb?.blockNewTrades ?? true;
+
   togglePaperTradingInputs();
   toggleProxyInputs();
   toggleTelegramInputs();
   toggleAdaptivePollingInputs();
+  toggleWeekendBreakInputs();
   settingsModal.style.display = 'flex';
 }
 
 function closeSettingsModal() {
   settingsModal.style.display = 'none';
+}
+
+function openTestTradeModal() {
+  if (!testTradeModal) return;
+  if (testTradeAlertBox) {
+    testTradeAlertBox.style.display = 'none';
+    testTradeAlertBox.innerText = '';
+  }
+  if (inputTestAmount && currentConfig) {
+    inputTestAmount.value = currentConfig.fixedAmountUsdt || 25;
+  }
+  testTradeModal.style.display = 'flex';
+  lucide.createIcons({ root: testTradeModal });
+}
+
+function closeTestTradeModal() {
+  if (testTradeModal) {
+    testTradeModal.style.display = 'none';
+  }
+}
+
+async function executeTestTrade() {
+  const symbol = selectTestSymbol ? selectTestSymbol.value : 'BTCUSDT';
+  const positionSide = selectTestSide ? selectTestSide.value : 'LONG';
+  const amountUsdt = inputTestAmount ? parseFloat(inputTestAmount.value) : 25;
+  const bypassWeekend = checkBypassWeekend ? checkBypassWeekend.checked : false;
+
+  if (btnExecuteTestTrade) {
+    btnExecuteTestTrade.disabled = true;
+    btnExecuteTestTrade.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>${currentLang === 'en' ? 'Executing...' : 'Mengeksekusi...'}</span>`;
+    lucide.createIcons({ root: btnExecuteTestTrade });
+  }
+
+  if (testTradeAlertBox) {
+    testTradeAlertBox.style.display = 'none';
+  }
+
+  try {
+    const res = await apiFetch('/api/engine/test-order', {
+      method: 'POST',
+      body: JSON.stringify({
+        symbol,
+        positionSide,
+        amountUsdt,
+        bypassWeekend,
+      }),
+    });
+    const data = await res.json();
+
+    if (testTradeAlertBox) {
+      testTradeAlertBox.style.display = 'block';
+      if (data.success) {
+        testTradeAlertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        testTradeAlertBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        testTradeAlertBox.style.color = '#34d399';
+        testTradeAlertBox.innerHTML = `<strong>✅ BERHASIL MASUK!</strong><br>${data.message}`;
+        playAudioNotification();
+        handleTableAction();
+      } else if (data.blockedByWeekend) {
+        testTradeAlertBox.style.background = 'rgba(234, 179, 8, 0.15)';
+        testTradeAlertBox.style.border = '1px solid rgba(234, 179, 8, 0.4)';
+        testTradeAlertBox.style.color = '#fde047';
+        testTradeAlertBox.innerHTML = `<strong>🌴 DITOLAK OLEH ATURAN LIBUR CST!</strong><br>${data.message}`;
+      } else {
+        testTradeAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        testTradeAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        testTradeAlertBox.style.color = '#f87171';
+        testTradeAlertBox.innerHTML = `<strong>❌ GAGAL EKSEKUSI:</strong><br>${data.message || 'Terjadi kesalahan sistem'}`;
+      }
+    }
+  } catch (err) {
+    if (testTradeAlertBox) {
+      testTradeAlertBox.style.display = 'block';
+      testTradeAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+      testTradeAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+      testTradeAlertBox.style.color = '#f87171';
+      testTradeAlertBox.innerHTML = `<strong>❌ ERROR KONEKSI:</strong><br>${err.message}`;
+    }
+  } finally {
+    if (btnExecuteTestTrade) {
+      btnExecuteTestTrade.disabled = false;
+      btnExecuteTestTrade.innerHTML = `<i data-lucide="play"></i> <span>${t('btn_run_test_trade', 'Eksekusi Order Uji Coba')}</span>`;
+      lucide.createIcons({ root: btnExecuteTestTrade });
+    }
+  }
 }
 
 function togglePaperTradingInputs() {
@@ -1535,6 +1747,33 @@ function toggleTelegramInputs() {
   if (row && checkTelegramEnabled) {
     row.style.opacity = checkTelegramEnabled.checked ? '1' : '0.5';
     row.style.pointerEvents = checkTelegramEnabled.checked ? 'auto' : 'none';
+  }
+}
+
+function toggleWeekendBreakInputs() {
+  const isEnabled = checkWeekendBreak ? checkWeekendBreak.checked : true;
+  if (weekendBreakInputsRow) {
+    weekendBreakInputsRow.style.opacity = isEnabled ? '1' : '0.5';
+    weekendBreakInputsRow.style.pointerEvents = isEnabled ? 'auto' : 'none';
+  }
+  const now = new Date();
+  const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const cstTime = new Date(utcMs + (8 * 3600000));
+  const wibTime = new Date(utcMs + (7 * 3600000));
+  const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  const cstStr = `${days[cstTime.getDay()]}, ${String(cstTime.getHours()).padStart(2, '0')}:${String(cstTime.getMinutes()).padStart(2, '0')} CST`;
+  const wibStr = `${days[wibTime.getDay()]}, ${String(wibTime.getHours()).padStart(2, '0')}:${String(wibTime.getMinutes()).padStart(2, '0')} WIB`;
+  if (weekendModalCstClock) weekendModalCstClock.innerText = `China: ${cstStr}`;
+  if (weekendModalWibClock) weekendModalWibClock.innerText = `WIB: ${wibStr}`;
+  if (weekendModalStatusBadge) {
+    const isWeekend = cstTime.getDay() === 0 || cstTime.getDay() === 6;
+    if (isWeekend) {
+      weekendModalStatusBadge.innerText = 'Akhir Pekan CST';
+      weekendModalStatusBadge.className = 'badge badge-emerald';
+    } else {
+      weekendModalStatusBadge.innerText = 'Hari Kerja CST (Aktif)';
+      weekendModalStatusBadge.className = 'badge badge-sky';
+    }
   }
 }
 
@@ -1630,6 +1869,12 @@ async function saveSettings() {
       morningIntervalMs: selectMorningInterval ? parseInt(selectMorningInterval.value) : 1800,
       afternoonIntervalMs: selectAfternoonInterval ? parseInt(selectAfternoonInterval.value) : 3000,
       nightIntervalMs: selectNightInterval ? parseInt(selectNightInterval.value) : 1500,
+    },
+    weekendBreak: {
+      enabled: checkWeekendBreak ? checkWeekendBreak.checked : true,
+      timezone: 'CST',
+      standbyIntervalSec: parseInt(selectWeekendStandbyInterval?.value || '60') || 60,
+      blockNewTrades: checkBlockWeekendNewTrades ? checkBlockWeekendNewTrades.checked : true,
     },
     ratioMultiplier: parseFloat(inputRatioMultiplier.value) || 1.0,
     fixedAmountUsdt: parseFloat(inputFixedAmount.value) || 25,

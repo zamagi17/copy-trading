@@ -65,9 +65,19 @@
           <span id="statusText">STANDBY</span>
         </div>
 
+        <div class="engine-badge badge-holiday" id="holidayBadge" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
+          <i data-lucide="palmtree" style="width: 14px; height: 14px;"></i>
+          <span id="holidayBadgeText">LIBUR AKHIR PEKAN</span>
+        </div>
+
         <button class="btn btn-success" id="btnToggleEngine" onclick="toggleEngine()">
           <i data-lucide="play" class="btn-icon" id="toggleIcon"></i>
           <span id="toggleBtnText">Mulai Copy Trade</span>
+        </button>
+
+        <button class="btn btn-warning" id="btnOpenTestTrade" onclick="openTestTradeModal()" title="Uji Coba Eksekusi Order" data-i18n-title="btn_test_trade_title">
+          <i data-lucide="flask-conical" class="btn-icon"></i>
+          <span data-i18n="btn_test_trade">Uji Eksekusi</span>
         </button>
 
         <button class="btn btn-danger" id="btnPanicClose" onclick="confirmPanicClose()">
@@ -188,6 +198,10 @@
           <div class="spec-item">
             <span class="spec-label"><i data-lucide="layers"></i> <span data-i18n="spec_leverage_label">Sync Leverage:</span></span>
             <span class="spec-value text-cyan" id="specLeverageSync">Otomatis (Cross)</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label"><i data-lucide="palmtree"></i> <span data-i18n="spec_weekend_label">Libur Akhir Pekan:</span></span>
+            <span class="spec-value text-green" id="specWeekendBreak">Aktif (CST)</span>
           </div>
         </div>
       </div>
@@ -425,8 +439,11 @@
           <!-- Adaptive Schedule Panel (shown when adaptive is ON) -->
           <div class="adaptive-schedule-panel" id="adaptiveSchedulePanel" style="display: none;">
             <div class="schedule-header">
-              <span class="schedule-title"><i data-lucide="clock"></i> <span data-i18n="adaptive_panel_title">Jadwal Sesi Pasar WIB (UTC+7)</span></span>
-              <span class="badge badge-sky" id="currentWibBadge">Waktu WIB: --:--</span>
+              <span class="schedule-title"><i data-lucide="clock"></i> <span data-i18n="adaptive_panel_title">Jadwal Sesi Pasar WIB (UTC+7) & China (UTC+8)</span></span>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <span class="badge badge-sky" id="currentWibBadge">Waktu WIB: --:--</span>
+                <span class="badge badge-emerald" id="currentCstBadge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">China CST: --:--</span>
+              </div>
             </div>
 
             <div class="schedule-grid">
@@ -496,6 +513,61 @@
                     <option value="1800">⚖️ 1.8 Detik (Seimbang)</option>
                   </select>
                 </div>
+              </div>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tab: Weekend Holiday (Waktu China CST UTC+8) -->
+        <fieldset class="form-group-fieldset">
+          <legend><i data-lucide="palmtree"></i> <span data-i18n="legend_weekend_break">Opsi Libur Akhir Pekan (Waktu China CST UTC+8)</span></legend>
+          
+          <div class="form-row">
+            <div class="form-field checkbox-field" style="margin-top: 4px;">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkWeekendBreak" onchange="toggleWeekendBreakInputs()">
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #34d399;" data-i18n="check_weekend_break">Aktifkan Libur Sabtu & Minggu (Waktu China CST UTC+8)</span>
+              </label>
+              <small data-i18n="hint_weekend_break_intro" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                Disesuaikan dengan lead trader China. Libur otomatis berlaku jika <strong>tidak ada posisi yang terbuka</strong>.
+              </small>
+            </div>
+          </div>
+
+          <div id="weekendBreakInputsRow" class="weekend-holiday-panel">
+            <div class="weekend-info-card">
+              <div class="weekend-info-header">
+                <span class="weekend-clock-pill"><i data-lucide="clock"></i> <span id="weekendModalCstClock">China CST: --:--</span></span>
+                <span class="weekend-clock-pill wib"><i data-lucide="map-pin"></i> <span id="weekendModalWibClock">WIB: --:--</span></span>
+                <span class="badge badge-emerald" id="weekendModalStatusBadge">Status: Standby</span>
+              </div>
+              <p class="weekend-info-text" data-i18n="weekend_info_explanation">
+                <strong>Jadwal Libur:</strong> Jumat 23:00 WIB (Sabtu 00:00 CST) s/d Minggu 23:00 WIB (Senin 00:00 CST).<br>
+                <strong>Aturan Keamanan:</strong> Jika akhir pekan tiba namun akun masih memiliki posisi terbuka, bot <strong>tetap aktif mengawal</strong> hingga posisi tertutup. Begitu bersih (0 posisi), bot otomatis beristirahat & melambatkan polling.
+              </p>
+            </div>
+
+            <div class="form-row" style="margin-top: 10px;">
+              <div class="form-field">
+                <label for="selectWeekendStandbyInterval" data-i18n="label_weekend_standby_interval">Interval Standby saat Libur (Hemat Kuota):</label>
+                <select id="selectWeekendStandbyInterval">
+                  <option value="30" data-i18n="opt_weekend_30">⏱️ 30 Detik (Santai)</option>
+                  <option value="60" selected data-i18n="opt_weekend_60">🛡️ 60 Detik (Optimal Seimbang - Rekomendasi)</option>
+                  <option value="120" data-i18n="opt_weekend_120">🌙 120 Detik (Ultra Hemat Kuota Proxy)</option>
+                </select>
+                <small data-i18n="hint_weekend_standby_interval">Frekuensi heartbeat bot saat libur untuk menghemat kuota proxy dan resource server.</small>
+              </div>
+
+              <div class="form-field checkbox-field" style="justify-content: center; margin-top: 16px;">
+                <label class="custom-checkbox">
+                  <input type="checkbox" id="checkBlockWeekendNewTrades" checked>
+                  <span class="checkmark"></span>
+                  <span style="font-weight: 600;" data-i18n="check_block_weekend_trades">Abaikan Order Baru Leader Selama Akhir Pekan</span>
+                </label>
+                <small data-i18n="hint_block_weekend_trades" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                  Menghindari buka posisi acak saat likuiditas pasar akhir pekan tipis.
+                </small>
               </div>
             </div>
           </div>
@@ -653,6 +725,78 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeSettingsModal()" data-i18n="btn_cancel">Batal</button>
         <button class="btn btn-primary" onclick="saveSettings()" data-i18n="btn_save_settings">Simpan Pengaturan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test Trade Execution Modal -->
+  <div class="modal-backdrop" id="testTradeModal" style="display: none;">
+    <div class="modal-dialog glass-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <i data-lucide="flask-conical" class="card-icon text-yellow"></i>
+          <h3 data-i18n="test_trade_modal_title">Uji Eksekusi Order (Test Trade)</h3>
+        </div>
+        <button class="btn-icon-close" onclick="closeTestTradeModal()">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top: 10px;">
+        <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 14px;" data-i18n="test_trade_intro">
+          Gunakan fitur ini untuk menguji apakah order berhasil dieksekusi dan masuk ke dalam sistem / Binance secara tepat.
+        </p>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label for="selectTestSymbol" data-i18n="label_test_symbol">Pilih Simbol Koin:</label>
+            <select id="selectTestSymbol">
+              <option value="BTCUSDT" selected>BTCUSDT (Bitcoin)</option>
+              <option value="ETHUSDT">ETHUSDT (Ethereum)</option>
+              <option value="SOLUSDT">SOLUSDT (Solana)</option>
+              <option value="BNBUSDT">BNBUSDT (BNB)</option>
+              <option value="DOGEUSDT">DOGEUSDT (Dogecoin)</option>
+              <option value="XRPUSDT">XRPUSDT (Ripple)</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label for="selectTestSide" data-i18n="label_test_side">Arah Posisi (Side):</label>
+            <select id="selectTestSide">
+              <option value="LONG" selected>🟢 LONG (Beli / Naik)</option>
+              <option value="SHORT">🔻 SHORT (Jual / Turun)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label for="inputTestAmount" data-i18n="label_test_amount">Nominal Modal Uji Coba (USDT):</label>
+            <input type="number" id="inputTestAmount" min="6" step="5" value="25">
+            <small data-i18n="hint_test_amount">Nominal margin USDT untuk membuka posisi uji coba ini.</small>
+          </div>
+
+          <div class="form-field checkbox-field" style="margin-top: 22px;">
+            <label class="custom-checkbox">
+              <input type="checkbox" id="checkBypassWeekend">
+              <span class="checkmark"></span>
+              <span style="font-weight: 700; color: #f59e0b;" data-i18n="check_bypass_weekend">Bypass Libur Akhir Pekan</span>
+            </label>
+            <small data-i18n="hint_bypass_weekend" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+              Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan CST menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.
+            </small>
+          </div>
+        </div>
+
+        <!-- Feedback Alert Box -->
+        <div id="testTradeAlertBox" style="display: none; margin-top: 14px; padding: 12px; border-radius: 8px; font-size: 0.8rem; line-height: 1.45;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeTestTradeModal()" data-i18n="btn_cancel">Tutup</button>
+        <button class="btn btn-warning" id="btnExecuteTestTrade" onclick="executeTestTrade()">
+          <i data-lucide="play"></i> <span data-i18n="btn_run_test_trade">Eksekusi Order Uji Coba</span>
+        </button>
       </div>
     </div>
   </div>

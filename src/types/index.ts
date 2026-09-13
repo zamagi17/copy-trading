@@ -20,12 +20,30 @@ export interface AdaptivePollingConfig {
   nightIntervalMs: number;     // 19:00 - 23:59 WIB (Pemanasan / Sesi London-NY)
 }
 
+export interface WeekendBreakConfig {
+  enabled: boolean;
+  timezone: 'CST';             // UTC+8 China Standard Time (Waktu China)
+  standbyIntervalSec: number;  // Interval polling saat libur (detik, default 60s)
+  blockNewTrades: boolean;     // Menolak pembukaan posisi baru selama akhir pekan (default true)
+}
+
+export interface WeekendBreakStatus {
+  isWeekendCST: boolean;       // Apakah saat ini Sabtu/Minggu Waktu China (CST UTC+8)
+  hasOpenPositions: boolean;   // Apakah akun masih memiliki posisi terbuka
+  isHolidayActive: boolean;    // Libur aktif (akhir pekan CST & tidak ada posisi terbuka)
+  cstTimeStr: string;          // Jam & Hari Waktu China saat ini
+  wibTimeStr: string;          // Jam & Hari Waktu WIB saat ini
+  resumeTimeStr: string;       // Jadwal selesai libur (Senin 00:00 CST / Minggu 23:00 WIB)
+}
+
 export interface PollingStatusInfo {
   isAdaptive: boolean;
   currentIntervalMs: number;
   sessionName: string;
-  sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' | 'manual';
+  sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' | 'manual' | 'weekend_break';
   wibTimeStr: string;
+  cstTimeStr?: string;
+  isWeekendHoliday?: boolean;
 }
 
 export interface AppConfig {
@@ -45,6 +63,7 @@ export interface AppConfig {
   emergencySlPct: number;
   pollingIntervalMs: number;
   adaptivePolling?: AdaptivePollingConfig;
+  weekendBreak?: WeekendBreakConfig;
   proxy: ProxyConfig;
   telegram?: TelegramConfig;
   adminPassword?: string;
@@ -132,6 +151,7 @@ export interface EngineStatus {
   activePairs: string[];
   lastError: string | null;
   pollingInfo?: PollingStatusInfo;
+  weekendBreak?: WeekendBreakStatus;
 }
 
 export interface ClosedTrade {
