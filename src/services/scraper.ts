@@ -35,7 +35,19 @@ export class CopyTradeScraper {
   private detailCache: Map<string, { data: any; perf?: any; lastFetch: number }> = new Map();
   private cachedClient: AxiosInstance | null = null;
   private cachedClientKey: string = '';
+  private cachedAgent: any = null;
   private lastRequestTime: number = 0;
+
+  public resetClient() {
+    if (this.cachedAgent && typeof this.cachedAgent.destroy === 'function') {
+      try {
+        this.cachedAgent.destroy();
+      } catch {}
+    }
+    this.cachedAgent = null;
+    this.cachedClient = null;
+    this.cachedClientKey = '';
+  }
 
   private async createClient(proxy?: ProxyConfig): Promise<AxiosInstance> {
     let proxyHost = (proxy?.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -57,7 +69,7 @@ export class CopyTradeScraper {
     // remote proxy/Cloudflare sudah memutus idle TCP connection (biasanya timeout 30-45s).
     // Reset client agar tidak mencoba memakai socket basi yang memicu 'socket hang up'!
     if (Date.now() - this.lastRequestTime > 20000) {
-      this.cachedClient = null;
+      this.resetClient();
     }
     this.lastRequestTime = Date.now();
 
@@ -91,10 +103,12 @@ export class CopyTradeScraper {
         maxSockets: 5,
         maxFreeSockets: 2,
         timeout: 60000,
+        rejectUnauthorized: false, // Mencegah 'unable to get local issuer certificate' pada proxy residential
       });
       config.httpAgent = agent;
       config.httpsAgent = agent;
       config.proxy = false;
+      this.cachedAgent = agent;
     } else {
       // Uji Coba Gratis / Direct: Gunakan DoH Resolver agar tidak diblokir ISP lokal (TrustPositif)
       const resolvedIp = await resolveBinanceIpViaDoH();
@@ -116,6 +130,7 @@ export class CopyTradeScraper {
           },
         });
         config.httpsAgent = agent;
+        this.cachedAgent = agent;
       }
     }
 
@@ -260,6 +275,7 @@ export class CopyTradeScraper {
 
   /**
    * Mengambil detail portofolio leader (nickname, total margin, ROI, dsb)
+   * Dilengkapi auto-retry 1x instan pada transient glitch agar tidak memicu log error palsu.
    */
   async fetchPortfolioDetail(portfolioId: string, proxy?: ProxyConfig): Promise<LeadPortfolioDetail> {
     const timestamp = Date.now();
@@ -282,111 +298,148 @@ export class CopyTradeScraper {
       };
     }
 
-    try {
-      const cached = this.detailCache.get(id);
-      let data = cached?.data;
+    let lastError: any = null;
+    const maxAttempts = 2;
 
-      let perf = cached?.perf;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this._doFetchPortfolioDetail(id, proxy, timestamp);
+      } catch (err: any) {
+        lastError = err;
+        this.resetClient();
 
-      // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 5 menit (300 detik)
-      if (!cached || timestamp - cached.lastFetch > 300000) {
-        try {
-          const client = await this.createClient(proxy);
-          const [detailRes, perfRes] = await Promise.allSettled([
-            client.get(`/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/detail?portfolioId=${id}`),
-            client.get(`/bapi/futures/v1/public/future/copy-trade/lead-portfolio/performance?portfolioId=${id}&timeRange=7D`)
-          ]);
-
-          if (detailRes.status === 'fulfilled' && detailRes.value.data?.data) {
-            data = detailRes.value.data.data;
-          }
-          if (perfRes.status === 'fulfilled' && perfRes.value.data?.data) {
-            perf = perfRes.value.data.data;
-          }
-
-          if (data || perf) {
-            this.detailCache.set(id, { data, perf, lastFetch: timestamp });
-          }
-        } catch {
-          // Jika gagal, gunakan data lama yang ada di cache
+        // Jangan retry jika error fatal seperti IP Blocked (403) atau Kuota Habis (407)
+        const isFatal = err.response?.status === 403 || err.response?.status === 407 ||
+          err.message?.includes('403') || err.message?.includes('407');
+        if (isFatal || attempt >= maxAttempts) {
+          break;
         }
+
+        // Tunggu sejenak (800ms) sebelum mencoba lagi dengan socket connection fresh
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }
-
-      const nickname = data?.nickname || data?.leadPortfolioName || `Leader ${id}`;
-      const avatarUrl = data?.avatarUrl || '';
-      const totalEquity = Number(data?.marginBalance ?? data?.totalEquity ?? data?.leadMargin ?? data?.currentBalance ?? 0);
-      const roi7d = Number(perf?.roi ?? data?.roi7d ?? data?.roi ?? 0);
-      const mdd7d = Number(perf?.mdd ?? data?.mdd7d ?? 0);
-      const winRate = Number(perf?.winRate ?? 0);
-      const copierPnl = Number(perf?.copierPnl ?? data?.copierPnl ?? 0);
-      const followerCount = Number(data?.currentCopyCount ?? data?.followerCount ?? 0);
-      const maxFollowerCount = Number(data?.maxCopyCount ?? data?.maxFollowerCount ?? 1000);
-      const positionShow = data?.positionShow !== false; // false jika di-private oleh leader
-
-      // Ambil posisi aktif jika public, atau ambil Latest Records HANYA jika mode privat
-      // Tidak mengambil keduanya sekaligus agar kuota proxy hemat hingga 50%!
-      let positions: LeadPosition[] = [];
-      let orders: LeadOrderRecord[] = [];
-
-      if (positionShow) {
-        // Mode Publik: Hanya ambil posisi aktif yang sedang terbuka
-        positions = await this.fetchPositions(id, proxy);
-      } else {
-        // Mode Privat: Cukup ambil 2 order teratas (menghemat payload JSON hingga 80%)
-        orders = await this.fetchOrderHistory(id, proxy, 2);
-      }
-
-      return {
-        portfolioId: id,
-        nickname,
-        avatarUrl,
-        totalEquity,
-        roi7d,
-        mdd7d,
-        winRate,
-        copierPnl,
-        followerCount,
-        maxFollowerCount,
-        positionShow,
-        positions,
-        orders,
-        lastFetchTime: timestamp,
-        isSuccess: true,
-      };
-    } catch (err: any) {
-      this.cachedClient = null; // Reset cached socket agar request berikutnya memakai koneksi baru
-      let errorMsg = err.message || 'Gagal mengambil data leader';
-      if (err.response?.status === 403 || err.message?.includes('403')) {
-        errorMsg = 'IP_BLOCKED_403: Akses DITOLAK oleh Cloudflare / Binance (HTTP 403 Forbidden). IP Proxy Anda terdeteksi atau terblokir.';
-      } else if (err.response?.status === 407 || err.message?.includes('407')) {
-        errorMsg = 'PROXY_AUTH_407: Autentikasi Proxy Gagal atau Kuota Habis (HTTP 407). Periksa saldo/kuota proxy Anda.';
-      } else if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
-        errorMsg = 'PROXY_REFUSED: Koneksi ke server proxy ditolak (Connection Refused). Periksa Host dan Port proxy.';
-      } else if (err.code === 'ETIMEDOUT' || err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        errorMsg = 'PROXY_TIMEOUT: Koneksi ke proxy timeout (>15 detik). Server proxy lambat atau tidak merespons.';
-      } else if (err.code === 'ENOTFOUND' || err.message?.includes('ENOTFOUND')) {
-        errorMsg = 'PROXY_DNS_FAILED: Host proxy tidak ditemukan (DNS lookup failed).';
-      } else if (err.message?.includes('socket hang up') || err.code === 'ECONNRESET') {
-        errorMsg = 'PROXY_SOCKET_IDLE: Koneksi socket proxy diputus oleh remote server (idle timeout). Otomatis me-refresh socket baru.';
-      }
-
-      return {
-        portfolioId,
-        nickname: `Leader ${portfolioId}`,
-        avatarUrl: '',
-        totalEquity: 0,
-        roi7d: 0,
-        mdd7d: 0,
-        followerCount: 0,
-        maxFollowerCount: 1000,
-        positionShow: false,
-        positions: [],
-        orders: [],
-        lastFetchTime: timestamp,
-        isSuccess: false,
-        errorMessage: errorMsg,
-      };
     }
+
+    return this._handleFetchError(id, lastError, timestamp);
+  }
+
+  private async _doFetchPortfolioDetail(id: string, proxy?: ProxyConfig, timestamp: number = Date.now()): Promise<LeadPortfolioDetail> {
+    const cached = this.detailCache.get(id);
+    let data = cached?.data;
+    let perf = cached?.perf;
+
+    // Ambil detail portofolio & performa (ROI/MDD) jika belum di-cache atau cache sudah lebih dari 5 menit (300 detik)
+    if (!cached || timestamp - cached.lastFetch > 300000) {
+      try {
+        const client = await this.createClient(proxy);
+        const [detailRes, perfRes] = await Promise.allSettled([
+          client.get(`/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/detail?portfolioId=${id}`),
+          client.get(`/bapi/futures/v1/public/future/copy-trade/lead-portfolio/performance?portfolioId=${id}&timeRange=7D`)
+        ]);
+
+        if (detailRes.status === 'fulfilled' && detailRes.value.data?.data) {
+          data = detailRes.value.data.data;
+        }
+        if (perfRes.status === 'fulfilled' && perfRes.value.data?.data) {
+          perf = perfRes.value.data.data;
+        }
+
+        if (data || perf) {
+          this.detailCache.set(id, { data, perf, lastFetch: timestamp });
+        }
+      } catch {
+        // Jika gagal, gunakan data lama yang ada di cache
+      }
+    }
+
+    const nickname = data?.nickname || data?.leadPortfolioName || `Leader ${id}`;
+    const avatarUrl = data?.avatarUrl || '';
+    const totalEquity = Number(data?.marginBalance ?? data?.totalEquity ?? data?.leadMargin ?? data?.currentBalance ?? 0);
+    const roi7d = Number(perf?.roi ?? data?.roi7d ?? data?.roi ?? 0);
+    const mdd7d = Number(perf?.mdd ?? data?.mdd7d ?? 0);
+    const winRate = Number(perf?.winRate ?? 0);
+    const copierPnl = Number(perf?.copierPnl ?? data?.copierPnl ?? 0);
+    const followerCount = Number(data?.currentCopyCount ?? data?.followerCount ?? 0);
+    const maxFollowerCount = Number(data?.maxCopyCount ?? data?.maxFollowerCount ?? 1000);
+    const positionShow = data?.positionShow !== false; // false jika di-private oleh leader
+
+    // Ambil posisi aktif jika public, atau ambil Latest Records HANYA jika mode privat
+    // Tidak mengambil keduanya sekaligus agar kuota proxy hemat hingga 50%!
+    let positions: LeadPosition[] = [];
+    let orders: LeadOrderRecord[] = [];
+
+    if (positionShow) {
+      // Mode Publik: Hanya ambil posisi aktif yang sedang terbuka
+      positions = await this.fetchPositions(id, proxy);
+    } else {
+      // Mode Privat: Cukup ambil 2 order teratas (menghemat payload JSON hingga 80%)
+      orders = await this.fetchOrderHistory(id, proxy, 2);
+    }
+
+    return {
+      portfolioId: id,
+      nickname,
+      avatarUrl,
+      totalEquity,
+      roi7d,
+      mdd7d,
+      winRate,
+      copierPnl,
+      followerCount,
+      maxFollowerCount,
+      positionShow,
+      positions,
+      orders,
+      lastFetchTime: timestamp,
+      isSuccess: true,
+    };
+  }
+
+  private _handleFetchError(portfolioId: string, err: any, timestamp: number): LeadPortfolioDetail {
+    this.resetClient();
+    let errorMsg = err?.message || 'Gagal mengambil data leader';
+    const msg = String(err?.message || '');
+    const code = String(err?.code || '');
+    const status = err?.response?.status;
+
+    if (status === 403 || msg.includes('403')) {
+      errorMsg = 'IP_BLOCKED_403: Akses DITOLAK oleh Cloudflare / Binance (HTTP 403 Forbidden). IP Proxy Anda terdeteksi atau terblokir.';
+    } else if (status === 407 || msg.includes('407')) {
+      errorMsg = 'PROXY_AUTH_407: Autentikasi Proxy Gagal atau Kuota Habis (HTTP 407). Periksa saldo/kuota proxy Anda.';
+    } else if (code === 'ECONNREFUSED' || msg.includes('ECONNREFUSED')) {
+      errorMsg = 'PROXY_REFUSED: Koneksi ke server proxy ditolak (Connection Refused). Periksa Host dan Port proxy.';
+    } else if (code === 'ETIMEDOUT' || code === 'ECONNABORTED' || msg.includes('timeout')) {
+      errorMsg = 'PROXY_TIMEOUT: Koneksi ke proxy timeout (>15 detik).';
+    } else if (code === 'ENOTFOUND' || msg.includes('ENOTFOUND')) {
+      errorMsg = 'PROXY_DNS_FAILED: Host proxy tidak ditemukan (DNS lookup failed).';
+    } else if (
+      msg.includes('EPROTO') ||
+      msg.includes('wrong version number') ||
+      msg.includes('SSL routines') ||
+      msg.includes('certificate') ||
+      msg.includes('local issuer')
+    ) {
+      errorMsg = 'PROXY_SSL_GLITCH: Terjadi gangguan handshake SSL pada node proxy residential.';
+    } else if (msg.includes('socket hang up') || code === 'ECONNRESET') {
+      errorMsg = 'PROXY_SOCKET_IDLE: Koneksi socket proxy diputus oleh remote server.';
+    }
+
+    return {
+      portfolioId,
+      nickname: `Leader ${portfolioId}`,
+      avatarUrl: '',
+      totalEquity: 0,
+      roi7d: 0,
+      mdd7d: 0,
+      followerCount: 0,
+      maxFollowerCount: 1000,
+      positionShow: false,
+      positions: [],
+      orders: [],
+      lastFetchTime: timestamp,
+      isSuccess: false,
+      errorMessage: errorMsg,
+    };
   }
 
   /**
@@ -442,6 +495,13 @@ export class CopyTradeScraper {
         msg = 'Akses DITOLAK oleh Cloudflare / Binance (HTTP 403 Forbidden). IP Proxy Anda terdeteksi/terblokir, silakan coba IP atau lokasi proxy lain.';
       } else if (err.response?.status === 404) {
         msg = 'Endpoint Binance tidak ditemukan (HTTP 404).';
+      } else if (
+        err.message?.includes('EPROTO') ||
+        err.message?.includes('wrong version number') ||
+        err.message?.includes('certificate') ||
+        err.message?.includes('local issuer')
+      ) {
+        msg = 'Gangguan handshake SSL pada node proxy. Silakan coba tes ulang.';
       }
       return { success: false, message: msg, latencyMs };
     }

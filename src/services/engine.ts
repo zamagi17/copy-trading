@@ -19,6 +19,7 @@ export class CopyTradeEngine {
   private logs: LogEntry[] = [];
   private pollCount: number = 0;
   private lastError: string | null = null;
+  private consecutiveProxyErrors: number = 0;
   private lastProcessedOrderTime: number = 0;
   private lastSessionKey: string = '';
   private lastUserPositionsCount: number = 0;
@@ -608,25 +609,30 @@ export class CopyTradeEngine {
     // 1. Fetch data posisi leader
     const leaderDetail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy);
     if (!leaderDetail.isSuccess) {
-      this.lastError = leaderDetail.errorMessage || 'Gagal fetch data leader';
-
       const isIpBlocked = leaderDetail.errorMessage?.includes('403');
       const isQuotaOut = leaderDetail.errorMessage?.includes('407');
-      const isTimeout = leaderDetail.errorMessage?.includes('TIMEOUT') || leaderDetail.errorMessage?.includes('timeout');
-      const isSocketIdle = leaderDetail.errorMessage?.includes('socket hang up') || leaderDetail.errorMessage?.includes('PROXY_SOCKET_IDLE');
 
       if (isIpBlocked) {
+        this.lastError = leaderDetail.errorMessage || 'IP_BLOCKED_403';
         this.log('ERROR', `🚨 [CRITICAL ALERT] IP PROXY DIBLOKIR BINANCE/CLOUDFLARE (HTTP 403)! Posisi akun Anda DIKUNCI AMAN (tidak akan ditutup). Harap segera ganti IP proxy di menu Pengaturan.`);
         this.sendTelegramRateLimited('IP_BLOCKED', `🚨 <b>[CRITICAL ALERT] IP PROXY DIBLOKIR (HTTP 403)</b>\n\nBinance/Cloudflare memblokir IP proxy Anda. Posisi akun Anda telah DIKUNCI AMAN (tidak akan ditutup sembarangan). Harap segera perbarui IP proxy di dashboard.`);
       } else if (isQuotaOut) {
+        this.lastError = leaderDetail.errorMessage || 'PROXY_AUTH_407';
         this.log('ERROR', `🚨 [CRITICAL ALERT] KUOTA PROXY HABIS / AUTENTIKASI GAGAL (HTTP 407)! Harap isi ulang kuota proxy Anda.`);
         this.sendTelegramRateLimited('QUOTA_OUT', `🚨 <b>[CRITICAL ALERT] KUOTA PROXY HABIS (HTTP 407)</b>\n\nKuota proxy DataImpulse Anda telah habis. Harap isi ulang kuota/bandwith proxy agar copy trade dapat berlanjut.`);
-      } else if (isTimeout) {
-        this.log('WARN', `⏳ Koneksi proxy timeout (>15 detik). Melewatkan tick ini demi keamanan.`);
-      } else if (isSocketIdle) {
-        this.log('INFO', `🔄 Jalur socket proxy di-refresh (koneksi idle ditutup remote server saat standby).`);
       } else {
-        this.log('WARN', `⚠️ Gagal fetch data leader: ${leaderDetail.errorMessage}`);
+        // Kedipan jaringan / transient proxy error (timeout, SSL glitch, socket idle)
+        this.consecutiveProxyErrors++;
+
+        // HANYA tampilkan peringatan di log jika kegagalan terjadi beruntun >= 3 kali
+        // (mencegah kedipan sesaat 1-2 tick mengotori terminal atau membuat cemas pengguna)
+        if (this.consecutiveProxyErrors >= 3) {
+          this.lastError = leaderDetail.errorMessage || 'Koneksi proxy tidak stabil';
+          // Rate-limited: Tampilkan di log pada kali ke-3, lalu setiap kelipatan 10 jika berkepanjangan
+          if (this.consecutiveProxyErrors === 3 || this.consecutiveProxyErrors % 10 === 0) {
+            this.log('WARN', `⚠️ Koneksi proxy tidak stabil (${this.consecutiveProxyErrors}x berturut-turut): ${leaderDetail.errorMessage}. Melewatkan tick demi keamanan.`);
+          }
+        }
       }
 
       // Broadcast update ke UI dashboard agar indikator status error segera terlihat
@@ -644,6 +650,7 @@ export class CopyTradeEngine {
       this.log('SUCCESS', `✅ Koneksi ke Binance Copy Trading berhasil pulih kembali normal.`);
       this.lastError = null;
     }
+    this.consecutiveProxyErrors = 0;
 
     this.lastLeaderEquity = leaderDetail.totalEquity || this.lastLeaderEquity;
     const currentLeaderPositions = leaderDetail.positions || [];
