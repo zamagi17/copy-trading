@@ -570,6 +570,31 @@
                 </small>
               </div>
             </div>
+
+            <!-- Smart Re-Entry Settings Row -->
+            <div class="form-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, 0.08);">
+              <div class="form-field checkbox-field" style="margin-top: 8px;">
+                <label class="custom-checkbox">
+                  <input type="checkbox" id="checkSmartReEntry" checked>
+                  <span class="checkmark"></span>
+                  <span style="font-weight: 700; color: #38bdf8;" data-i18n="check_smart_reentry">Smart Re-Entry (Toleransi Pemulihan SL)</span>
+                </label>
+                <small data-i18n="hint_smart_reentry" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                  Jika posisi baru tertutup / terkena jarum SL di akhir pekan, izinkan leader membuka kembali koin yang sama untuk recovery.
+                </small>
+              </div>
+
+              <div class="form-field">
+                <label for="selectReEntryWindow" data-i18n="label_reentry_window">Jendela Toleransi Waktu Re-Entry:</label>
+                <select id="selectReEntryWindow">
+                  <option value="15" data-i18n="opt_reentry_15">⚡ 15 Menit</option>
+                  <option value="30" selected data-i18n="opt_reentry_30">🎯 30 Menit (Optimal Seimbang)</option>
+                  <option value="45" data-i18n="opt_reentry_45">⏳ 45 Menit</option>
+                  <option value="60" data-i18n="opt_reentry_60">🛡️ 60 Menit (Maksimal)</option>
+                </select>
+                <small data-i18n="hint_reentry_window">Batas waktu leader untuk re-entry recovery sebelum bot mengunci libur penuh.</small>
+              </div>
+            </div>
           </div>
         </fieldset>
 

@@ -25,12 +25,16 @@ export interface WeekendBreakConfig {
   timezone: 'CST';             // UTC+8 China Standard Time (Waktu China)
   standbyIntervalSec: number;  // Interval polling saat libur (detik, default 60s)
   blockNewTrades: boolean;     // Menolak pembukaan posisi baru selama akhir pekan (default true)
+  smartReEntryEnabled?: boolean;   // Izinkan buka kembali jika posisi baru ditutup/kena SL (default true)
+  reEntryWindowMinutes?: number;   // Jendela toleransi re-entry setelah close (default 30 menit)
 }
 
 export interface WeekendBreakStatus {
   isWeekendCST: boolean;       // Apakah saat ini Sabtu/Minggu Waktu China (CST UTC+8)
   hasOpenPositions: boolean;   // Apakah akun masih memiliki posisi terbuka
-  isHolidayActive: boolean;    // Libur aktif (akhir pekan CST & tidak ada posisi terbuka)
+  isHolidayActive: boolean;    // Libur aktif (akhir pekan CST & tidak ada posisi terbuka & luar window re-entry)
+  inReEntryWindow?: boolean;   // Sedang dalam jendela waktu tunggu toleransi re-entry
+  reEntryRemainingMins?: number; // Sisa menit toleransi re-entry
   cstTimeStr: string;          // Jam & Hari Waktu China saat ini
   wibTimeStr: string;          // Jam & Hari Waktu WIB saat ini
   resumeTimeStr: string;       // Jadwal selesai libur (Senin 00:00 CST / Minggu 23:00 WIB)

@@ -25,6 +25,7 @@ export class CopyTradeEngine {
   private isHolidayActive: boolean = false;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public virtualWalletBalance: number = 100;
+  public recentlyClosedCoins: Map<string, { symbol: string; positionSide: 'LONG' | 'SHORT'; closedAt: number; action: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
   private wsBroadcaster: ((type: string, payload: any) => void) | null = null;
 
@@ -113,6 +114,16 @@ export class CopyTradeEngine {
     }
     this.saveTradeHistory();
 
+    // Catat koin yang baru ditutup untuk keperluan Smart Re-Entry di akhir pekan
+    if (fullTrade.action === 'FULL_CLOSE' || fullTrade.action === 'EMERGENCY_SL' || fullTrade.action === 'PANIC_CLOSE') {
+      this.recentlyClosedCoins.set(fullTrade.symbol, {
+        symbol: fullTrade.symbol,
+        positionSide: fullTrade.positionSide,
+        closedAt: now.getTime(),
+        action: fullTrade.action,
+      });
+    }
+
     if (this.wsBroadcaster) {
       this.wsBroadcaster('CLOSED_TRADE', fullTrade);
     }
@@ -160,7 +171,12 @@ export class CopyTradeEngine {
             timezone: 'CST',
             standbyIntervalSec: 60,
             blockNewTrades: true,
+            smartReEntryEnabled: true,
+            reEntryWindowMinutes: 30,
           };
+        } else {
+          if (parsed.weekendBreak.smartReEntryEnabled === undefined) parsed.weekendBreak.smartReEntryEnabled = true;
+          if (parsed.weekendBreak.reEntryWindowMinutes === undefined) parsed.weekendBreak.reEntryWindowMinutes = 30;
         }
         return parsed;
       }
@@ -189,6 +205,8 @@ export class CopyTradeEngine {
         timezone: 'CST',
         standbyIntervalSec: 60,
         blockNewTrades: true,
+        smartReEntryEnabled: true,
+        reEntryWindowMinutes: 30,
       },
       proxy: {
         enabled: false,
@@ -380,12 +398,36 @@ export class CopyTradeEngine {
 
     const count = overridePositionsCount !== undefined ? overridePositionsCount : this.getUserPositionsCount();
     const hasOpenPositions = count > 0;
-    const isHolidayActive = Boolean(cfg?.enabled && isWeekend && !hasOpenPositions);
+
+    // Evaluasi Smart Re-Entry Grace Window
+    const reEntryWindowMs = (cfg?.reEntryWindowMinutes || 30) * 60 * 1000;
+    let inReEntryWindow = false;
+    let reEntryRemainingMins = 0;
+
+    if (cfg?.smartReEntryEnabled !== false && !hasOpenPositions) {
+      const now = Date.now();
+      for (const [sym, item] of this.recentlyClosedCoins.entries()) {
+        const elapsed = now - item.closedAt;
+        if (elapsed <= reEntryWindowMs) {
+          inReEntryWindow = true;
+          const remaining = Math.ceil((reEntryWindowMs - elapsed) / 60000);
+          if (remaining > reEntryRemainingMins) {
+            reEntryRemainingMins = remaining;
+          }
+        } else {
+          this.recentlyClosedCoins.delete(sym);
+        }
+      }
+    }
+
+    const isHolidayActive = Boolean(cfg?.enabled && isWeekend && !hasOpenPositions && !inReEntryWindow);
 
     return {
       isWeekendCST: isWeekend,
       hasOpenPositions,
       isHolidayActive,
+      inReEntryWindow,
+      reEntryRemainingMins,
       cstTimeStr: times.cstTimeStr,
       wibTimeStr: times.wibTimeStr,
       resumeTimeStr: 'Senin 00:00 CST (Minggu 23:00 WIB)',
@@ -396,7 +438,20 @@ export class CopyTradeEngine {
     const times = this.getTimes();
     const weekendStatus = this.getWeekendBreakStatus();
 
-    // 1. Jika Mode Libur Akhir Pekan aktif (akhir pekan CST & tidak ada posisi terbuka)
+    // 1. Jika dalam Jendela Toleransi Smart Re-Entry (tetap polling aktif agar re-entry cepat tertangkap)
+    if (weekendStatus.inReEntryWindow) {
+      return {
+        isAdaptive: false,
+        currentIntervalMs: 2000,
+        sessionName: `🎯 Toleransi Re-Entry (${weekendStatus.reEntryRemainingMins}m sisa)`,
+        sessionKey: 'weekend_break',
+        wibTimeStr: times.wibTimeStr,
+        cstTimeStr: times.cstTimeStr,
+        isWeekendHoliday: false,
+      };
+    }
+
+    // 2. Jika Mode Libur Akhir Pekan aktif (akhir pekan CST & tidak ada posisi terbuka & luar re-entry window)
     if (weekendStatus.isHolidayActive) {
       const standbySec = this.config.weekendBreak?.standbyIntervalSec || 60;
       return {
@@ -911,9 +966,29 @@ export class CopyTradeEngine {
     // 0. Proteksi Mode Libur Akhir Pekan (Waktu China CST UTC+8)
     const isAveragingDown = Boolean(existingUserPos && Math.abs(existingUserPos.positionAmt) > 0);
     const weekendStatus = this.getWeekendBreakStatus();
+
+    // Cek apakah ini Smart Re-Entry pada koin yang baru saja ditutup / kena SL
+    const reEntryWindowMs = (this.config.weekendBreak?.reEntryWindowMinutes || 30) * 60 * 1000;
+    const recentClose = this.recentlyClosedCoins.get(leaderPos.symbol);
+    const isSmartReEntry = Boolean(
+      this.config.weekendBreak?.smartReEntryEnabled !== false &&
+      recentClose &&
+      (Date.now() - recentClose.closedAt) <= reEntryWindowMs
+    );
+
     if (this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
       if (isAveragingDown) {
         this.log('INFO', `⚡ [LIBUR AKHIR PEKAN - AVG DOWN] Leader menambah muatan (Averaging Down) pada ${leaderPos.symbol} ${leaderPos.positionSide} yang SEDANG TERBUKA. Eksekusi penambahan posisi TETAP DILANJUTKAN untuk mengawal posisi aktif.`);
+      } else if (isSmartReEntry) {
+        const elapsedMins = Math.max(1, Math.round((Date.now() - (recentClose?.closedAt || Date.now())) / 60000));
+        this.log('SUCCESS', `🎯 [SMART RE-ENTRY WEEKEND] Leader membuka kembali ${leaderPos.symbol} ${leaderPos.positionSide} (${elapsedMins} menit setelah posisi sebelumnya ditutup). Eksekusi RE-ENTRY DIIZINKAN untuk mengawal strategi pemulihan leader!`);
+        this.sendTelegram(
+          `🎯 <b>ORDER SMART RE-ENTRY DIIZINKAN [AKHIR PEKAN]</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
+          `⏱️ Waktu Jeda: <b>${elapsedMins} menit</b> setelah penutupan sebelumnya.\n` +
+          `ℹ️ Eksekusi recovery trade dijalankan otomatis sesuai strategi leader.`
+        );
+        this.recentlyClosedCoins.delete(leaderPos.symbol);
       } else {
         this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu China: ${weekendStatus.cstTimeStr}) dan akun belum memiliki posisi terbuka pada koin ini.`);
         return;

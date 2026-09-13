@@ -25,7 +25,9 @@
     "enabled": true,
     "timezone": "CST",
     "standbyIntervalSec": 60,
-    "blockNewTrades": true
+    "blockNewTrades": true,
+    "smartReEntryEnabled": true,
+    "reEntryWindowMinutes": 30
   },
   "proxy": {
     "enabled": false,

@@ -237,6 +237,15 @@ const I18N = {
     hint_weekend_standby_interval: 'Frekuensi heartbeat bot saat libur untuk menghemat kuota proxy dan resource server.',
     check_block_weekend_trades: 'Abaikan Order Baru Leader Selama Akhir Pekan',
     hint_block_weekend_trades: 'Menghindari buka posisi acak saat likuiditas pasar akhir pekan tipis.',
+    check_smart_reentry: 'Smart Re-Entry (Toleransi Pemulihan SL)',
+    hint_smart_reentry: 'Jika posisi baru tertutup / terkena jarum SL di akhir pekan, izinkan leader membuka kembali koin yang sama untuk recovery.',
+    label_reentry_window: 'Jendela Toleransi Waktu Re-Entry:',
+    hint_reentry_window: 'Batas waktu leader untuk re-entry recovery sebelum bot mengunci libur penuh.',
+    opt_reentry_15: '⚡ 15 Menit',
+    opt_reentry_30: '🎯 30 Menit (Optimal Seimbang)',
+    opt_reentry_45: '⏳ 45 Menit',
+    opt_reentry_60: '🛡️ 60 Menit (Maksimal)',
+    status_weekend_reentry: 'TOLERANSI RE-ENTRY',
     spec_weekend_label: 'Libur Akhir Pekan:',
     spec_weekend_active: 'Aktif (Waktu China)',
     spec_weekend_disabled: 'Nonaktif (24/7)',
@@ -474,6 +483,15 @@ const I18N = {
     hint_weekend_standby_interval: 'Heartbeat interval during holiday to save residential proxy quota and server resources.',
     check_block_weekend_trades: 'Ignore New Leader Orders During Weekend',
     hint_block_weekend_trades: 'Avoids entering erratic weekend trades when market liquidity is low.',
+    check_smart_reentry: 'Smart Re-Entry (SL Recovery Tolerance)',
+    hint_smart_reentry: 'If a position just closed or got stopped out on weekends, allow leader to re-enter the same coin for recovery.',
+    label_reentry_window: 'Re-Entry Tolerance Grace Window:',
+    hint_reentry_window: 'Maximum grace time for leader to re-enter recovery trade before full holiday lockdown.',
+    opt_reentry_15: '⚡ 15 Minutes',
+    opt_reentry_30: '🎯 30 Minutes (Optimal Balance)',
+    opt_reentry_45: '⏳ 45 Minutes',
+    opt_reentry_60: '🛡️ 60 Minutes (Maximum)',
+    status_weekend_reentry: 'RE-ENTRY GRACE PERIOD',
     spec_weekend_label: 'Weekend Holiday:',
     spec_weekend_active: 'Active (China Time)',
     spec_weekend_disabled: 'Disabled (24/7)',
@@ -735,6 +753,8 @@ const checkWeekendBreak = document.getElementById('checkWeekendBreak');
 const weekendBreakInputsRow = document.getElementById('weekendBreakInputsRow');
 const selectWeekendStandbyInterval = document.getElementById('selectWeekendStandbyInterval');
 const checkBlockWeekendNewTrades = document.getElementById('checkBlockWeekendNewTrades');
+const checkSmartReEntry = document.getElementById('checkSmartReEntry');
+const selectReEntryWindow = document.getElementById('selectReEntryWindow');
 const weekendModalCstClock = document.getElementById('weekendModalCstClock');
 const weekendModalWibClock = document.getElementById('weekendModalWibClock');
 const weekendModalStatusBadge = document.getElementById('weekendModalStatusBadge');
@@ -1042,6 +1062,13 @@ function updateEngineUI(status) {
       holidayBadge.style.color = '#34d399';
       if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_holiday', 'LIBUR AKHIR PEKAN (CST)');
       holidayBadge.title = `Mode Libur Aktif (${wb.cstTimeStr}). Standby polling aktif. Buka kembali: ${wb.resumeTimeStr}`;
+    } else if (wb.inReEntryWindow && isEngineActive) {
+      holidayBadge.style.display = 'flex';
+      holidayBadge.style.background = 'rgba(56, 189, 248, 0.15)';
+      holidayBadge.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+      holidayBadge.style.color = '#38bdf8';
+      if (holidayBadgeText) holidayBadgeText.innerText = `🎯 RE-ENTRY GRACE (${wb.reEntryRemainingMins || 30}M)`;
+      holidayBadge.title = `Jendela Toleransi Smart Re-Entry Aktif: Bot siaga menangkap re-entry leader dalam ${wb.reEntryRemainingMins} menit ke depan sebelum libur.`;
     } else if (wb.isWeekendCST && wb.hasOpenPositions && isEngineActive) {
       holidayBadge.style.display = 'flex';
       holidayBadge.style.background = 'rgba(234, 179, 8, 0.15)';
@@ -1630,6 +1657,8 @@ function openSettingsModal() {
   if (checkWeekendBreak) checkWeekendBreak.checked = wb?.enabled ?? true;
   if (selectWeekendStandbyInterval) selectWeekendStandbyInterval.value = wb?.standbyIntervalSec || 60;
   if (checkBlockWeekendNewTrades) checkBlockWeekendNewTrades.checked = wb?.blockNewTrades ?? true;
+  if (checkSmartReEntry) checkSmartReEntry.checked = wb?.smartReEntryEnabled !== false;
+  if (selectReEntryWindow) selectReEntryWindow.value = String(wb?.reEntryWindowMinutes || 30);
 
   togglePaperTradingInputs();
   toggleProxyInputs();
@@ -1875,6 +1904,8 @@ async function saveSettings() {
       timezone: 'CST',
       standbyIntervalSec: parseInt(selectWeekendStandbyInterval?.value || '60') || 60,
       blockNewTrades: checkBlockWeekendNewTrades ? checkBlockWeekendNewTrades.checked : true,
+      smartReEntryEnabled: checkSmartReEntry ? checkSmartReEntry.checked : true,
+      reEntryWindowMinutes: parseInt(selectReEntryWindow?.value || '30') || 30,
     },
     ratioMultiplier: parseFloat(inputRatioMultiplier.value) || 1.0,
     fixedAmountUsdt: parseFloat(inputFixedAmount.value) || 25,
