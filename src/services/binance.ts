@@ -92,16 +92,23 @@ export class BinanceFuturesClient {
           side = amt > 0 ? 'LONG' : 'SHORT';
         }
 
+        const entryPrice = Number(p.entryPrice || 0);
+        const leverage = Math.max(1, Number(p.leverage || 1));
+        const notional = Math.abs(Number(p.notional || 0));
+        const computedMargin = (Math.abs(amt) * entryPrice) / leverage;
+        const margin = Number(p.initialMargin || p.isolatedMargin || computedMargin || 0);
+
         return {
           symbol: p.symbol,
           positionSide: side,
           positionAmt: amt,
-          entryPrice: Number(p.entryPrice || 0),
+          entryPrice,
           markPrice: Number(p.markPrice || 0),
           unRealizedProfit: Number(p.unRealizedProfit || 0),
-          leverage: Number(p.leverage || 1),
+          leverage,
           marginType: p.marginType || 'cross',
-          notional: Math.abs(Number(p.notional || 0)),
+          notional,
+          margin,
         };
       });
   }

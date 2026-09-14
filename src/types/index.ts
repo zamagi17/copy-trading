@@ -127,6 +127,7 @@ export interface UserPosition {
   leverage: number;
   marginType: string;
   notional: number;
+  margin?: number;
 }
 
 export interface BalanceInfo {

@@ -59,6 +59,11 @@ export class CopyTradeEngine {
         }
         if (Array.isArray(data.virtualPositions)) {
           this.virtualPositions = new Map(data.virtualPositions);
+          for (const [key, pos] of this.virtualPositions) {
+            if (pos && typeof pos.margin !== 'number') {
+              pos.margin = (Math.abs(pos.positionAmt) * (pos.entryPrice || pos.markPrice || 0)) / Math.max(1, pos.leverage || 10);
+            }
+          }
         }
         if (typeof data.lastProcessedOrderTime === 'number' && data.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = data.lastProcessedOrderTime;
@@ -1064,9 +1069,11 @@ export class CopyTradeEngine {
         const oldQty = Math.abs(existingUserPos.positionAmt);
         const newQty = oldQty + targetQty;
         const newEntry = (oldQty * existingUserPos.entryPrice + targetQty * markPrice) / newQty;
+        const lev = Math.max(1, existingUserPos.leverage || 10);
         existingUserPos.positionAmt = leaderPos.positionSide === 'LONG' ? newQty : -newQty;
         existingUserPos.entryPrice = newEntry;
         existingUserPos.notional = newQty * markPrice;
+        existingUserPos.margin = (newQty * newEntry) / lev;
         this.virtualPositions.set(posKey, existingUserPos);
         this.saveVirtualState();
         this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${targetQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
@@ -1083,6 +1090,8 @@ export class CopyTradeEngine {
         return;
       }
 
+      const lev = Math.max(1, leaderPos.leverage || 10);
+      const estMargin = (targetQty * markPrice) / lev;
       const virtualPos: UserPosition = {
         symbol: leaderPos.symbol,
         positionSide: leaderPos.positionSide,
@@ -1090,14 +1099,14 @@ export class CopyTradeEngine {
         entryPrice: markPrice,
         markPrice: markPrice,
         unRealizedProfit: 0,
-        leverage: leaderPos.leverage || 10,
+        leverage: lev,
         marginType: leaderPos.marginType || 'CROSSED',
         notional: targetQty * markPrice,
+        margin: estMargin,
       };
       this.virtualPositions.set(posKey, virtualPos);
       this.saveVirtualState();
-      const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
-      this.log('SUCCESS', `🧪 [MODE SIMULASI] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} @ $${markPrice} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${leaderPos.leverage || 10}x)`);
+      this.log('SUCCESS', `🧪 [MODE SIMULASI] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} @ $${markPrice} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${lev}x)`);
       this.sendTelegram(
         `🚀 <b>ORDER COPY TRADE DIBUKA [🧪 SIMULASI]</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
@@ -1181,9 +1190,11 @@ export class CopyTradeEngine {
       const oldQty = Math.abs(existingUserPos.positionAmt);
       const newQty = oldQty + addQty;
       const newEntry = (oldQty * existingUserPos.entryPrice + addQty * markPrice) / newQty;
+      const lev = Math.max(1, existingUserPos.leverage || 10);
       existingUserPos.positionAmt = leaderPos.positionSide === 'LONG' ? newQty : -newQty;
       existingUserPos.entryPrice = newEntry;
       existingUserPos.notional = newQty * markPrice;
+      existingUserPos.margin = (newQty * newEntry) / lev;
       this.virtualPositions.set(posKey, existingUserPos);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${addQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
@@ -1427,6 +1438,7 @@ export class CopyTradeEngine {
     // 3. Eksekusi sesuai mode (Simulasi / Live Binance)
     if (this.config.paperTrading) {
       const posKey = `${symbol}_${positionSide}`;
+      const lev = 10;
       const userPos: UserPosition = {
         symbol,
         positionSide,
@@ -1434,9 +1446,10 @@ export class CopyTradeEngine {
         entryPrice: markPrice,
         markPrice,
         unRealizedProfit: 0,
-        leverage: 10,
+        leverage: lev,
         marginType: 'CROSSED',
         notional: targetQty * markPrice,
+        margin: (targetQty * markPrice) / lev,
       };
 
       this.virtualPositions.set(posKey, userPos);

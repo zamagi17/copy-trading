@@ -82,8 +82,10 @@ const I18N = {
     th_leader_entry: 'Entry Leader',
     th_user_pos: 'Posisi Akun Anda',
     th_user_entry: 'Entry Anda',
+    th_margin_used: 'Margin Terpakai',
     th_ratio: 'Rasio Akun',
     th_floating_pnl: 'Floating PnL',
+    th_roi_pct: 'ROI %',
     th_sync_status: 'Status Sinkron',
 
     th_closed_time: 'Waktu Selesai',
@@ -328,8 +330,10 @@ const I18N = {
     th_leader_entry: 'Leader Entry',
     th_user_pos: 'Your Position',
     th_user_entry: 'Your Entry',
+    th_margin_used: 'Used Margin',
     th_ratio: 'Account Ratio',
     th_floating_pnl: 'Floating PnL',
+    th_roi_pct: 'ROI %',
     th_sync_status: 'Sync Status',
 
     th_closed_time: 'Closed Time',
@@ -1289,7 +1293,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
   if (leaderList.length === 0 && userList.length === 0) {
     positionsTableBody.innerHTML = `
       <tr class="empty-row">
-        <td colspan="8">
+        <td colspan="10">
           <div class="empty-state">
             <i data-lucide="${isPrivate ? 'shield' : 'inbox'}" class="empty-icon ${isPrivate ? 'text-purple' : ''}"></i>
             <p>${isPrivate ? `<b>${t('empty_private_title', 'Mode Privat Aktif pada Leader Ini')}</b>` : t('empty_open_title', 'Leader saat ini belum memiliki posisi aktif yang terbuka.')}</p>
@@ -1356,6 +1360,42 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       ? `$${formatPrice(lp.entryPrice)}` 
       : (isPrivate && up ? `$${formatPrice(up.entryPrice)}` : '--');
 
+    // Hitung margin terpakai
+    let userMargin = 0;
+    let userMarginDisplay = '<span class="text-muted">--</span>';
+    if (up && Math.abs(up.positionAmt) > 0) {
+      if (typeof up.margin === 'number' && up.margin > 0) {
+        userMargin = up.margin;
+      } else {
+        const pPrice = up.entryPrice > 0 ? up.entryPrice : (up.markPrice || 0);
+        userMargin = (Math.abs(up.positionAmt) * pPrice) / Math.max(1, up.leverage || 10);
+      }
+      userMarginDisplay = `<span class="text-yellow font-bold">$${formatNumber(userMargin)}</span> <span class="text-dim text-xs">USDT</span>`;
+    }
+
+    let leaderMarginDisplay = '';
+    let leaderMargin = 0;
+    if (lp && lp.amount > 0 && lp.entryPrice > 0) {
+      leaderMargin = (lp.amount * lp.entryPrice) / Math.max(1, lp.leverage || 10);
+      leaderMarginDisplay = `<small class="text-dim">L: $${formatNumber(leaderMargin)}</small><br/>`;
+    }
+
+    // Hitung persentase ROI (%)
+    let userRoiDisplay = '<span class="text-muted">--</span>';
+    let userRoiColor = 'text-muted';
+    if (up && userMargin > 0) {
+      const userRoi = (up.unRealizedProfit / userMargin) * 100;
+      userRoiColor = userRoi >= 0 ? 'text-green' : 'text-red';
+      userRoiDisplay = `${userRoi >= 0 ? '+' : ''}${userRoi.toFixed(2)}%`;
+    }
+
+    let leaderRoiDisplay = '';
+    if (lp && leaderMargin > 0) {
+      const leaderRoi = (lp.unrealizedProfit / leaderMargin) * 100;
+      const leaderRoiColor = leaderRoi >= 0 ? 'text-green' : 'text-red';
+      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${leaderRoi >= 0 ? '+' : ''}${leaderRoi.toFixed(2)}%</small><br/>`;
+    }
+
     html += `
       <tr>
         <td><b>${symbol}</b> ${sideBadge} <span class="badge badge-purple">${leverage}x</span></td>
@@ -1363,10 +1403,15 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td>${leaderEntryDisplay}</td>
         <td>${up ? `${formatQty(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : `<span class="text-muted">${currentLang === 'en' ? 'None' : 'Belum ada'}</span>`}</td>
         <td>${up ? `$${formatPrice(up.entryPrice)}` : '--'}</td>
+        <td>${leaderMarginDisplay}${userMarginDisplay}</td>
         <td>${ratioDisplay}</td>
         <td>
           ${lp ? `<span class="${leaderPnlColor}">L: $${formatNumber(lp.unrealizedProfit)}</span><br/>` : ''}
           <span class="${userPnlColor}">U: ${up ? `$${formatNumber(up.unRealizedProfit)}` : '--'}</span>
+        </td>
+        <td>
+          ${leaderRoiDisplay}
+          <span class="${userRoiColor}">U: ${userRoiDisplay}</span>
         </td>
         <td>${syncBadge}</td>
       </tr>

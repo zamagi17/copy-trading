@@ -541,6 +541,8 @@ body {
 .text-yellow { color: var(--accent-yellow); }
 .text-purple { color: var(--accent-purple); }
 .text-muted { color: var(--text-muted); }
+.text-dim { color: var(--text-dim); }
+.text-xs { font-size: 0.72rem; }
 
 /* Main Workspace */
 .main-layout {
