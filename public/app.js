@@ -1307,10 +1307,8 @@ function updateUserAccountUI(balance, positions) {
   userWalletBalance.innerHTML = `$${formatNumber(total)} <span class="currency">USDT</span>`;
   userAvailableBalance.innerText = `$${formatNumber(avail)}`;
 
-  const isZeroPnl = Math.abs(pnl) < 0.001;
-  const pnlSign = isZeroPnl ? '' : (pnl > 0 ? '+' : '');
-  userFloatingPnl.innerText = `${pnlSign}$${formatNumber(pnl)}`;
-  userFloatingPnl.className = `metric-val ${pnl > 0 ? 'text-green' : pnl < 0 ? 'text-red' : 'text-muted'}`;
+  userFloatingPnl.innerText = formatCurrency(pnl, true);
+  userFloatingPnl.className = `metric-val ${pnl > 0.001 ? 'text-green' : pnl < -0.001 ? 'text-red' : 'text-muted'}`;
 
   // Hitung total margin terpakai untuk menghitung ROI keseluruhan akun & posisi aktif
   let totalUsedMargin = 0;
@@ -1340,11 +1338,9 @@ function updateUserAccountUI(balance, positions) {
   }
 
   if (userFloatingRoi) {
-    const isZeroRoi = Math.abs(roi) < 0.01;
-    const roiSign = isZeroRoi ? '' : (roi > 0 ? '+' : '');
-    userFloatingRoi.innerText = `${roiSign}${roi.toFixed(2)}%`;
-    userFloatingRoi.className = `badge ${roi > 0 ? 'badge-green' : roi < 0 ? 'badge-red' : 'badge-gray'}`;
-    userFloatingRoi.title = `ROI Margin Terpakai: ${roiSign}${roi.toFixed(2)}% | ROI Total Modal Akun: ${accountRoi >= 0 ? '+' : ''}${accountRoi.toFixed(2)}%`;
+    userFloatingRoi.innerText = formatPercent(roi, true);
+    userFloatingRoi.className = `badge ${roi > 0.005 ? 'badge-green' : roi < -0.005 ? 'badge-red' : 'badge-gray'}`;
+    userFloatingRoi.title = `ROI Margin Terpakai: ${formatPercent(roi, true)} | ROI Total Modal Akun: ${formatPercent(accountRoi, true)}`;
   }
 
   const count = positions ? positions.length : 0;
@@ -1403,8 +1399,8 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       ? '<span class="badge badge-green">LONG</span>' 
       : '<span class="badge badge-red">SHORT</span>';
 
-    const leaderPnlColor = lp && lp.unrealizedProfit >= 0 ? 'text-green' : 'text-red';
-    const userPnlColor = up && up.unRealizedProfit >= 0 ? 'text-green' : 'text-red';
+    const userPnlVal = up ? (Number(up.unRealizedProfit) || 0) : 0;
+    const userPnlColor = !up ? 'text-muted' : (userPnlVal > 0.001 ? 'text-green' : userPnlVal < -0.001 ? 'text-red' : 'text-muted');
 
     let syncBadge = '';
     if (lp && up) {
@@ -1486,34 +1482,35 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
     let userRoiColor = 'text-muted';
     if (up && userMargin > 0) {
       const userRoi = (up.unRealizedProfit / userMargin) * 100;
-      userRoiColor = userRoi >= 0 ? 'text-green' : 'text-red';
-      userRoiDisplay = `${userRoi >= 0 ? '+' : ''}${userRoi.toFixed(2)}%`;
+      userRoiColor = userRoi > 0.005 ? 'text-green' : userRoi < -0.005 ? 'text-red' : 'text-muted';
+      userRoiDisplay = formatPercent(userRoi, true);
     }
 
     let leaderRoiDisplay = '';
     if (lp && leaderMargin > 0 && typeof lp.unrealizedProfit === 'number') {
       const leaderRoi = (lp.unrealizedProfit / leaderMargin) * 100;
-      const leaderRoiColor = leaderRoi >= 0 ? 'text-green' : 'text-red';
-      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${leaderRoi >= 0 ? '+' : ''}${leaderRoi.toFixed(2)}%</small><br/>`;
+      const leaderRoiColor = leaderRoi > 0.005 ? 'text-green' : leaderRoi < -0.005 ? 'text-red' : 'text-muted';
+      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${formatPercent(leaderRoi, true)}</small><br/>`;
     } else if (leaderMargin > 0 && leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
       const pnl = side === 'LONG'
         ? (markPrice - leaderEntryPrice) * leaderAmount
         : (leaderEntryPrice - markPrice) * leaderAmount;
       const leaderRoi = (pnl / leaderMargin) * 100;
-      const leaderRoiColor = leaderRoi >= 0 ? 'text-green' : 'text-red';
-      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${leaderRoi >= 0 ? '+' : ''}${leaderRoi.toFixed(2)}%</small><br/>`;
+      const leaderRoiColor = leaderRoi > 0.005 ? 'text-green' : leaderRoi < -0.005 ? 'text-red' : 'text-muted';
+      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${formatPercent(leaderRoi, true)}</small><br/>`;
     }
 
     let leaderPnlDisplay = '';
     if (lp && typeof lp.unrealizedProfit === 'number') {
-      const pnlColor = lp.unrealizedProfit >= 0 ? 'text-green' : 'text-red';
-      leaderPnlDisplay = `<span class="${pnlColor}">L: $${formatNumber(lp.unrealizedProfit)}</span><br/>`;
+      const pnl = lp.unrealizedProfit;
+      const pnlColor = pnl > 0.001 ? 'text-green' : pnl < -0.001 ? 'text-red' : 'text-muted';
+      leaderPnlDisplay = `<span class="${pnlColor}">L: ${formatCurrency(pnl, true)}</span><br/>`;
     } else if (leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
       const pnl = side === 'LONG'
         ? (markPrice - leaderEntryPrice) * leaderAmount
         : (leaderEntryPrice - markPrice) * leaderAmount;
-      const pnlColor = pnl >= 0 ? 'text-green' : 'text-red';
-      leaderPnlDisplay = `<span class="${pnlColor}">L: $${formatNumber(pnl)}</span><br/>`;
+      const pnlColor = pnl > 0.001 ? 'text-green' : pnl < -0.001 ? 'text-red' : 'text-muted';
+      leaderPnlDisplay = `<span class="${pnlColor}">L: ${formatCurrency(pnl, true)}</span><br/>`;
     }
 
     // Hitung Total Slippage antara Entry Leader dan Entry Anda
@@ -1602,7 +1599,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td>${ratioDisplay}</td>
         <td>
           ${leaderPnlDisplay}
-          <span class="${userPnlColor}">U: ${up ? `$${formatNumber(up.unRealizedProfit)}` : '--'}</span>
+          <span class="${userPnlColor}">U: ${up ? formatCurrency(userPnlVal, true) : '--'}</span>
         </td>
         <td>
           ${leaderRoiDisplay}
@@ -1626,8 +1623,8 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       sumUserPnl += (Number(up.unRealizedProfit) || 0);
     }
     const sumUserRoi = sumUserMargin > 0 ? (sumUserPnl / sumUserMargin) * 100 : 0;
-    const totalPnlColor = sumUserPnl >= 0 ? 'text-green' : 'text-red';
-    const totalRoiColor = sumUserRoi >= 0 ? 'text-green' : 'text-red';
+    const totalPnlColor = sumUserPnl > 0.001 ? 'text-green' : sumUserPnl < -0.001 ? 'text-red' : 'text-muted';
+    const totalRoiColor = sumUserRoi > 0.005 ? 'badge-green' : sumUserRoi < -0.005 ? 'badge-red' : 'badge-gray';
 
     html += `
       <tr class="table-total-row" style="background: rgba(14, 20, 36, 0.95); font-weight: 700; border-top: 2px solid rgba(255, 255, 255, 0.16);">
@@ -1635,8 +1632,8 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td colspan="7" class="text-dim text-xs" style="text-align: right; padding-right: 12px;">Total Margin & Floating ROI:</td>
         <td><span class="text-yellow font-bold">$${formatNumber(sumUserMargin)}</span> <span class="text-dim text-xs">USDT</span></td>
         <td>--</td>
-        <td><span class="${totalPnlColor} font-bold">${sumUserPnl >= 0 ? '+' : ''}$${formatNumber(sumUserPnl)}</span></td>
-        <td><span class="badge ${sumUserRoi >= 0 ? 'badge-green' : 'badge-red'}" style="font-size: 0.72rem; font-weight: 800;">${sumUserRoi >= 0 ? '+' : ''}${sumUserRoi.toFixed(2)}%</span></td>
+        <td><span class="${totalPnlColor} font-bold">${formatCurrency(sumUserPnl, true)}</span></td>
+        <td><span class="badge ${totalRoiColor}" style="font-size: 0.72rem; font-weight: 800;">${formatPercent(sumUserRoi, true)}</span></td>
         <td>--</td>
       </tr>
     `;
@@ -1710,8 +1707,8 @@ function updateClosedTradesUI(trades) {
   if (histTotalTrades) histTotalTrades.innerText = totalTrades;
   if (histWinRate) histWinRate.innerText = `${winRate}%`;
   if (histTotalPnl) {
-    histTotalPnl.innerText = `${totalRealizedPnl >= 0 ? '+' : ''}$${totalRealizedPnl.toFixed(2)} USDT`;
-    histTotalPnl.className = `stat-chip-val ${totalRealizedPnl > 0 ? 'text-green' : totalRealizedPnl < 0 ? 'text-red' : ''}`;
+    histTotalPnl.innerText = `${formatCurrency(totalRealizedPnl, true)} USDT`;
+    histTotalPnl.className = `stat-chip-val ${totalRealizedPnl > 0.001 ? 'text-green' : totalRealizedPnl < -0.001 ? 'text-red' : ''}`;
   }
   if (histWinLoss) histWinLoss.innerText = `${winCount}W / ${lossCount}L`;
 
@@ -1778,10 +1775,10 @@ function renderClosedTradesTable() {
         <td>$${formatPrice(item.entryPrice)}</td>
         <td>$${formatPrice(item.closePrice)}</td>
         <td class="${pnlClass}" style="font-weight: 700;">
-          ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT
+          ${formatCurrency(pnl, true)} USDT
         </td>
         <td class="${pnlClass}" style="font-weight: 600;">
-          ${(item.pnlPct || 0) >= 0 ? '+' : ''}${Number(item.pnlPct || 0).toFixed(2)}%
+          ${formatPercent(item.pnlPct || 0, true)}
         </td>
         <td>${modeBadge}</td>
       </tr>
@@ -2308,6 +2305,32 @@ async function testProxy() {
 function formatNumber(num) {
   if (num === undefined || num === null || isNaN(num)) return '0.00';
   return Number(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatCurrency(amount, withSign = false) {
+  if (amount === undefined || amount === null || isNaN(amount)) return '$0.00';
+  const num = Number(amount);
+  const isZero = Math.abs(num) < 0.001;
+  const absFormatted = Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (isZero) return `$${absFormatted}`;
+  if (num > 0) {
+    return withSign ? `+$${absFormatted}` : `$${absFormatted}`;
+  } else {
+    return `-$${absFormatted}`;
+  }
+}
+
+function formatPercent(pct, withSign = true) {
+  if (pct === undefined || pct === null || isNaN(pct)) return '0.00%';
+  const num = Number(pct);
+  const isZero = Math.abs(num) < 0.005;
+  const absFormatted = Math.abs(num).toFixed(2);
+  if (isZero) return `${absFormatted}%`;
+  if (num > 0) {
+    return withSign ? `+${absFormatted}%` : `${absFormatted}%`;
+  } else {
+    return `-${absFormatted}%`;
+  }
 }
 
 function formatQty(num) {
