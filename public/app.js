@@ -82,6 +82,7 @@ const I18N = {
     th_leader_entry: 'Entry Leader',
     th_user_pos: 'Posisi Akun Anda',
     th_user_entry: 'Entry Anda',
+    th_avg_down: 'Avg Down',
     th_total_slippage: 'Total Slippage',
     th_mark_price: 'Harga Mark',
     th_margin_used: 'Margin Terpakai',
@@ -332,6 +333,7 @@ const I18N = {
     th_leader_entry: 'Leader Entry',
     th_user_pos: 'Your Position',
     th_user_entry: 'Your Entry',
+    th_avg_down: 'Avg Down',
     th_total_slippage: 'Total Slippage',
     th_mark_price: 'Mark Price',
     th_margin_used: 'Used Margin',
@@ -1297,7 +1299,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
   if (leaderList.length === 0 && userList.length === 0) {
     positionsTableBody.innerHTML = `
       <tr class="empty-row">
-        <td colspan="12">
+        <td colspan="13">
           <div class="empty-state">
             <i data-lucide="${isPrivate ? 'shield' : 'inbox'}" class="empty-icon ${isPrivate ? 'text-purple' : ''}"></i>
             <p>${isPrivate ? `<b>${t('empty_private_title', 'Mode Privat Aktif pada Leader Ini')}</b>` : t('empty_open_title', 'Leader saat ini belum memiliki posisi aktif yang terbuka.')}</p>
@@ -1476,6 +1478,53 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       `;
     }
 
+    // Hitung berapa kali averaging down / tambah posisi
+    let leaderAvg = typeof lp?.avgCount === 'number' ? lp.avgCount : 0;
+    let userAvg = typeof up?.avgCount === 'number' ? up.avgCount : 0;
+
+    // Fallback: jika leaderAvg belum tercatat, inferensikan dari riwayat orders stream
+    if (leaderAvg === 0 && Array.isArray(orders)) {
+      const openOrders = orders.filter(
+        (o) => o.symbol === symbol && o.positionSide === side && o.action === 'OPEN'
+      );
+      if (openOrders.length > 1) {
+        leaderAvg = openOrders.length - 1;
+        if (userAvg === 0) {
+          userAvg = leaderAvg;
+        }
+      }
+    }
+
+    let avgDownDisplay = '';
+    const layerSuffix = 'Layer';
+    const layersSuffix = currentLang === 'en' ? 'Layers' : 'Layer';
+
+    if (leaderAvg === userAvg) {
+      const count = userAvg;
+      if (count === 0) {
+        avgDownDisplay = `
+          <span class="badge badge-gray" title="${currentLang === 'en' ? 'Initial entry (0x avg down / 1 layer)' : 'Entry awal (0x avg down / 1 layer)'}">0x</span><br/>
+          <small class="text-dim">1 ${layerSuffix}</small>
+        `;
+      } else {
+        const badgeClass = count === 1 ? 'badge-yellow' : 'badge-purple';
+        const titleText = currentLang === 'en'
+          ? `${count}x scaled in (${count + 1} layers total)`
+          : `${count}x averaging down (Total ${count + 1} layer)`;
+        avgDownDisplay = `
+          <span class="badge ${badgeClass} font-bold" title="${titleText}">+${count}x</span><br/>
+          <small class="text-dim">${count + 1} ${layersSuffix}</small>
+        `;
+      }
+    } else {
+      const lBadge = leaderAvg === 0 ? 'badge-gray' : (leaderAvg === 1 ? 'badge-yellow' : 'badge-purple');
+      const uBadge = userAvg === 0 ? 'badge-gray' : (userAvg === 1 ? 'badge-yellow' : 'badge-purple');
+      avgDownDisplay = `
+        <small class="text-dim">L:</small> <span class="badge ${lBadge}" title="Leader: ${leaderAvg}x avg down (${leaderAvg + 1} layer)">${leaderAvg > 0 ? `+${leaderAvg}x` : '0x'}</span><br/>
+        <small class="text-dim">U:</small> <span class="badge ${uBadge}" title="Akun Anda: ${userAvg}x avg down (${userAvg + 1} layer)">${userAvg > 0 ? `+${userAvg}x` : '0x'}</span>
+      `;
+    }
+
     html += `
       <tr>
         <td><b>${symbol}</b> ${sideBadge} <span class="badge badge-purple">${leverage}x</span></td>
@@ -1483,6 +1532,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td>${leaderEntryDisplay}</td>
         <td>${up ? `${formatQty(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : `<span class="text-muted">${currentLang === 'en' ? 'None' : 'Belum ada'}</span>`}</td>
         <td>${up ? `$${formatPrice(up.entryPrice)}` : '--'}</td>
+        <td>${avgDownDisplay}</td>
         <td>${slippageDisplay}</td>
         <td>${markPriceDisplay}</td>
         <td>${leaderMarginDisplay}${userMarginDisplay}</td>
@@ -2224,7 +2274,7 @@ async function resetDemoData() {
       `;
       positionsTableBody.innerHTML = `
         <tr class="empty-state-row">
-          <td colspan="12">
+          <td colspan="13">
             <div class="empty-state">
               <i data-lucide="inbox" class="empty-icon"></i>
               <p>${t('empty_open_title', 'Belum ada posisi yang disalin.')}</p>

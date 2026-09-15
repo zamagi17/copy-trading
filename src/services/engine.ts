@@ -26,6 +26,7 @@ export class CopyTradeEngine {
   private isHolidayActive: boolean = false;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public streamLeaderPositions: Map<string, LeadPosition> = new Map();
+  public positionAvgCounts: Map<string, { leader: number; user: number }> = new Map();
   public virtualWalletBalance: number = 100;
   public recentlyClosedCoins: Map<string, { symbol: string; positionSide: 'LONG' | 'SHORT'; closedAt: number; action: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
@@ -45,6 +46,7 @@ export class CopyTradeEngine {
         virtualWalletBalance: this.virtualWalletBalance,
         virtualPositions: Array.from(this.virtualPositions.entries()),
         streamLeaderPositions: Array.from(this.streamLeaderPositions.entries()),
+        positionAvgCounts: Array.from(this.positionAvgCounts.entries()),
         lastProcessedOrderTime: this.lastProcessedOrderTime,
       };
       fs.writeFileSync(VIRTUAL_STATE_PATH, JSON.stringify(data, null, 2), 'utf-8');
@@ -69,6 +71,9 @@ export class CopyTradeEngine {
         }
         if (Array.isArray(data.streamLeaderPositions)) {
           this.streamLeaderPositions = new Map(data.streamLeaderPositions);
+        }
+        if (Array.isArray(data.positionAvgCounts)) {
+          this.positionAvgCounts = new Map(data.positionAvgCounts);
         }
         if (typeof data.lastProcessedOrderTime === 'number' && data.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = data.lastProcessedOrderTime;
@@ -317,6 +322,7 @@ export class CopyTradeEngine {
   resetDemo() {
     this.virtualPositions.clear();
     this.streamLeaderPositions.clear();
+    this.positionAvgCounts.clear();
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
     this.logs = [];
     this.lastProcessedOrderTime = 0;
@@ -328,14 +334,30 @@ export class CopyTradeEngine {
     this.log('INFO', '🧹 Riwayat demo & posisi virtual telah di-reset bersih.');
   }
 
+  getVirtualPositions(): UserPosition[] {
+    const list = Array.from(this.virtualPositions.values());
+    for (const p of list) {
+      const counts = this.positionAvgCounts.get(`${p.symbol}_${p.positionSide}`);
+      p.avgCount = counts?.user || 0;
+    }
+    return list;
+  }
+
   getLastLeaderDetail(): LeadPortfolioDetail | null {
-    if (this.lastLeaderDetail && this.lastLeaderDetail.positionShow === false) {
+    if (this.lastLeaderDetail) {
+      const positions = (this.lastLeaderDetail.positionShow === false
+        ? Array.from(this.streamLeaderPositions.values())
+        : this.lastLeaderDetail.positions) || [];
+      for (const p of positions) {
+        const counts = this.positionAvgCounts.get(`${p.symbol}_${p.positionSide}`);
+        p.avgCount = counts?.leader || 0;
+      }
       return {
         ...this.lastLeaderDetail,
-        positions: Array.from(this.streamLeaderPositions.values()),
+        positions,
       };
     }
-    return this.lastLeaderDetail;
+    return null;
   }
 
   async fetchLeaderSnapshot(): Promise<LeadPortfolioDetail | null> {
@@ -346,10 +368,10 @@ export class CopyTradeEngine {
         if (detail.positionShow === false) {
           detail.positions = Array.from(this.streamLeaderPositions.values());
         }
-        this.lastLeaderDetail = detail;
-        this.lastLeaderEquity = detail.totalEquity;
         if (detail.positions && detail.positions.length > 0) {
           for (const lp of detail.positions) {
+            const counts = this.positionAvgCounts.get(`${lp.symbol}_${lp.positionSide}`);
+            lp.avgCount = counts?.leader || 0;
             if (!lp.markPrice || lp.markPrice <= 0) {
               try {
                 const mp = await binanceClient.getSymbolPrice(lp.symbol);
@@ -814,7 +836,13 @@ export class CopyTradeEngine {
               this.log('INFO', `🔥 [Latest Records] Leader MEMBUKA ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Vol: ${ord.executedQty})`);
               const posKey = `${ord.symbol}_${ord.positionSide}`;
               const existingStream = this.streamLeaderPositions.get(posKey);
+              let leaderAvg = 0;
               if (existingStream) {
+                const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+                counts.leader = (counts.leader || 0) + 1;
+                this.positionAvgCounts.set(posKey, counts);
+                leaderAvg = counts.leader;
+
                 const oldQty = existingStream.amount;
                 const newQty = oldQty + ord.executedQty;
                 const newEntry = (oldQty * existingStream.entryPrice + ord.executedQty * ord.avgPrice) / newQty;
@@ -822,7 +850,11 @@ export class CopyTradeEngine {
                 existingStream.entryPrice = newEntry;
                 existingStream.notional = newQty * ord.avgPrice;
                 existingStream.updateTime = ord.orderTime;
+                existingStream.avgCount = leaderAvg;
               } else {
+                if (!this.positionAvgCounts.has(posKey)) {
+                  this.positionAvgCounts.set(posKey, { leader: 0, user: 0 });
+                }
                 this.streamLeaderPositions.set(posKey, {
                   symbol: ord.symbol,
                   positionSide: ord.positionSide,
@@ -834,6 +866,7 @@ export class CopyTradeEngine {
                   unrealizedProfit: 0,
                   notional: ord.executedQty * ord.avgPrice,
                   updateTime: ord.orderTime,
+                  avgCount: 0,
                 });
               }
               this.saveVirtualState();
@@ -848,6 +881,7 @@ export class CopyTradeEngine {
                 marginType: 'CROSSED',
                 unrealizedProfit: 0,
                 notional: ord.executedQty * ord.avgPrice,
+                avgCount: leaderAvg,
               };
               await this.handleNewPosition(mockPos, userBalance, userPositionsMap.get(`${ord.symbol}_${ord.positionSide}`));
             } else if (ord.action === 'CLOSE') {
@@ -874,6 +908,7 @@ export class CopyTradeEngine {
 
                 if (isFullClose) {
                   this.streamLeaderPositions.delete(key);
+                  this.positionAvgCounts.delete(key);
                   this.saveVirtualState();
                   this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup Penuh)`);
                   if (this.config.paperTrading) {
@@ -1078,6 +1113,16 @@ export class CopyTradeEngine {
     this.lastLeaderPositions = currentLeaderMap;
     this.lastLeaderDetail = leaderDetail;
 
+    // Pasang avgCount ke posisi leader dan user sebelum broadcast
+    for (const lp of currentLeaderPositions) {
+      const counts = this.positionAvgCounts.get(`${lp.symbol}_${lp.positionSide}`);
+      lp.avgCount = counts?.leader || 0;
+    }
+    for (const up of userPositions) {
+      const counts = this.positionAvgCounts.get(`${up.symbol}_${up.positionSide}`);
+      up.avgCount = counts?.user || 0;
+    }
+
     // Broadcast update ke UI dashboard via WebSocket
     if (this.wsBroadcaster) {
       this.wsBroadcaster('TICK', {
@@ -1193,6 +1238,10 @@ export class CopyTradeEngine {
 
       // JIKA POSISI SUDAH ADA (Averaging / Menambah Posisi):
       if (existingUserPos && Math.abs(existingUserPos.positionAmt) > 0) {
+        const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+        counts.user = (counts.user || 0) + 1;
+        this.positionAvgCounts.set(posKey, counts);
+
         const oldQty = Math.abs(existingUserPos.positionAmt);
         const newQty = oldQty + targetQty;
         const newEntry = (oldQty * existingUserPos.entryPrice + targetQty * markPrice) / newQty;
@@ -1201,13 +1250,15 @@ export class CopyTradeEngine {
         existingUserPos.entryPrice = newEntry;
         existingUserPos.notional = newQty * markPrice;
         existingUserPos.margin = (newQty * newEntry) / lev;
+        existingUserPos.avgCount = counts.user;
         this.virtualPositions.set(posKey, existingUserPos);
         this.saveVirtualState();
-        this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${targetQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
+        this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil (ke-${counts.user}x): ${leaderPos.symbol} (+${targetQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
         this.sendTelegram(
           `➕ <b>ORDER AVERAGING DOWN [🧪 SIMULASI]</b>\n\n` +
           `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
           `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+          `🔄 Averaging Down: <b>ke-${counts.user}x (${counts.user + 1} Layer)</b>\n` +
           `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
           `📍 Harga Mark: <b>$${markPrice}</b>\n` +
           `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
@@ -1220,6 +1271,10 @@ export class CopyTradeEngine {
 
       const lev = Math.max(1, leaderPos.leverage || 10);
       const estMargin = (targetQty * markPrice) / lev;
+      const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+      counts.user = 0;
+      this.positionAvgCounts.set(posKey, counts);
+
       const virtualPos: UserPosition = {
         symbol: leaderPos.symbol,
         positionSide: leaderPos.positionSide,
@@ -1231,6 +1286,7 @@ export class CopyTradeEngine {
         marginType: leaderPos.marginType || 'CROSSED',
         notional: targetQty * markPrice,
         margin: estMargin,
+        avgCount: 0,
       };
       this.virtualPositions.set(posKey, virtualPos);
       this.saveVirtualState();
@@ -1319,6 +1375,11 @@ export class CopyTradeEngine {
 
     if (this.config.paperTrading) {
       const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+      const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+      counts.leader = (counts.leader || 0) + 1;
+      counts.user = (counts.user || 0) + 1;
+      this.positionAvgCounts.set(posKey, counts);
+
       const oldQty = Math.abs(existingUserPos.positionAmt);
       const newQty = oldQty + addQty;
       const newEntry = (oldQty * existingUserPos.entryPrice + addQty * markPrice) / newQty;
@@ -1327,13 +1388,15 @@ export class CopyTradeEngine {
       existingUserPos.entryPrice = newEntry;
       existingUserPos.notional = newQty * markPrice;
       existingUserPos.margin = (newQty * newEntry) / lev;
+      existingUserPos.avgCount = counts.user;
       this.virtualPositions.set(posKey, existingUserPos);
       this.saveVirtualState();
-      this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil: ${leaderPos.symbol} (+${addQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
+      this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil (ke-${counts.user}x): ${leaderPos.symbol} (+${addQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
       this.sendTelegram(
         `➕ <b>ORDER AVERAGING DOWN [🧪 SIMULASI]</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `🔄 Averaging Down: <b>ke-${counts.user}x (${counts.user + 1} Layer)</b>\n` +
         `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
@@ -1345,14 +1408,21 @@ export class CopyTradeEngine {
     }
 
     try {
+      const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+      const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+      counts.leader = (counts.leader || 0) + 1;
+      counts.user = (counts.user || 0) + 1;
+      this.positionAvgCounts.set(posKey, counts);
+
       const side: 'BUY' | 'SELL' = leaderPos.positionSide === 'LONG' ? 'BUY' : 'SELL';
-      this.log('INFO', `➕ Menambah posisi ${leaderPos.symbol} sebanyak ${addQty}...`);
+      this.log('INFO', `➕ Menambah posisi (ke-${counts.user}x) ${leaderPos.symbol} sebanyak ${addQty}...`);
       await binanceClient.placeMarketOrder(leaderPos.symbol, side, addQty, false);
       this.log('SUCCESS', `✅ Berhasil menambah posisi ${leaderPos.symbol} (+${addQty})`);
       this.sendTelegram(
         `➕ <b>ORDER AVERAGING DOWN [🟢 LIVE FUTURES]</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `🔄 Averaging Down: <b>ke-${counts.user}x (${counts.user + 1} Layer)</b>\n` +
         `💵 Harga Pasar: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         `📦 Tambahan Volume: <b>+${addQty}</b>\n` +
@@ -1444,9 +1514,12 @@ export class CopyTradeEngine {
       const posKey = `${existingUserPos.symbol}_${side}`;
       this.virtualWalletBalance += pnl;
       this.virtualPositions.delete(posKey);
+      this.positionAvgCounts.delete(posKey);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Posisi ${existingUserPos.symbol} ${side} DITUTUP LENGKAP! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT. Saldo simulasi: $${this.virtualWalletBalance.toFixed(2)} USDT`);
     } else {
+      const posKey = `${existingUserPos.symbol}_${side}`;
+      this.positionAvgCounts.delete(posKey);
       try {
         this.log('INFO', `🚪 Mengirim order Market Close untuk ${existingUserPos.symbol} (Qty: ${qty})...`);
         await binanceClient.closePosition(existingUserPos.symbol, side, qty);
@@ -1573,25 +1646,52 @@ export class CopyTradeEngine {
     if (this.config.paperTrading) {
       const posKey = `${symbol}_${positionSide}`;
       const lev = 10;
-      const userPos: UserPosition = {
-        symbol,
-        positionSide,
-        positionAmt: positionSide === 'LONG' ? targetQty : -targetQty,
-        entryPrice: markPrice,
-        markPrice,
-        unRealizedProfit: 0,
-        leverage: lev,
-        marginType: 'CROSSED',
-        notional: targetQty * markPrice,
-        margin: (targetQty * markPrice) / lev,
-      };
+      const bypassNotice = bypassWeekend ? ' [BYPASS LIBUR]' : '';
+      const existing = this.virtualPositions.get(posKey);
+      let userPos: UserPosition;
 
-      this.virtualPositions.set(posKey, userPos);
+      if (existing && Math.abs(existing.positionAmt) > 0) {
+        // Uji coba averaging down (tambah posisi)
+        const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+        counts.user = (counts.user || 0) + 1;
+        this.positionAvgCounts.set(posKey, counts);
+
+        const oldQty = Math.abs(existing.positionAmt);
+        const newQty = oldQty + targetQty;
+        const newEntry = (oldQty * existing.entryPrice + targetQty * markPrice) / newQty;
+        existing.positionAmt = positionSide === 'LONG' ? newQty : -newQty;
+        existing.entryPrice = newEntry;
+        existing.markPrice = markPrice;
+        existing.notional = newQty * markPrice;
+        existing.margin = (newQty * newEntry) / lev;
+        existing.avgCount = counts.user;
+        this.virtualPositions.set(posKey, existing);
+        userPos = existing;
+        this.log('SUCCESS', `🧪 [TEST ORDER SIMULASI]${bypassNotice} Averaging Down uji coba ke-${counts.user}x pada ${symbol} ${positionSide} BERHASIL (+${targetQty}, total: ${newQty.toFixed(4)} koin @ $${newEntry.toFixed(2)})!`);
+      } else {
+        const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
+        counts.user = 0;
+        this.positionAvgCounts.set(posKey, counts);
+
+        userPos = {
+          symbol,
+          positionSide,
+          positionAmt: positionSide === 'LONG' ? targetQty : -targetQty,
+          entryPrice: markPrice,
+          markPrice,
+          unRealizedProfit: 0,
+          leverage: lev,
+          marginType: 'CROSSED',
+          notional: targetQty * markPrice,
+          margin: (targetQty * markPrice) / lev,
+          avgCount: 0,
+        };
+        this.virtualPositions.set(posKey, userPos);
+        this.log('SUCCESS', `🧪 [TEST ORDER SIMULASI]${bypassNotice} Posisi uji coba ${symbol} ${positionSide} BERHASIL MASUK (Vol: ${targetQty} koin @ $${markPrice})! Posisi aktif tercatat.`);
+      }
+
       this.saveVirtualState();
       this.lastUserPositionsCount = this.virtualPositions.size;
-
-      const bypassNotice = bypassWeekend ? ' [BYPASS LIBUR]' : '';
-      this.log('SUCCESS', `🧪 [TEST ORDER SIMULASI]${bypassNotice} Posisi uji coba ${symbol} ${positionSide} BERHASIL MASUK (Vol: ${targetQty} koin @ $${markPrice})! Posisi aktif tercatat.`);
 
       if (this.wsBroadcaster) {
         this.wsBroadcaster('TICK', {
@@ -1601,9 +1701,9 @@ export class CopyTradeEngine {
               totalWalletBalance: this.virtualWalletBalance,
               totalUnrealizedProfit: 0,
               totalMarginBalance: this.virtualWalletBalance,
-              availableBalance: Math.max(0, this.virtualWalletBalance - (targetQty * markPrice / 10)),
+              availableBalance: Math.max(0, this.virtualWalletBalance - (Math.abs(userPos.positionAmt) * userPos.entryPrice / 10)),
             },
-            positions: Array.from(this.virtualPositions.values()),
+            positions: this.getVirtualPositions(),
             closedTrades: this.closedTrades,
           },
         });

@@ -84,6 +84,7 @@ export interface LeadPosition {
   marginType: 'CROSSED' | 'ISOLATED';
   unrealizedProfit: number;
   notional: number;
+  avgCount?: number;
   updateTime?: number;
 }
 
@@ -128,6 +129,7 @@ export interface UserPosition {
   marginType: string;
   notional: number;
   margin?: number;
+  avgCount?: number;
 }
 
 export interface BalanceInfo {

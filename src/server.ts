@@ -65,7 +65,7 @@ wss.on('connection', (ws, req) => {
       totalMarginBalance: engine.virtualWalletBalance + totalUnrealizedProfit,
       availableBalance: Math.max(0, engine.virtualWalletBalance - usedMargin),
     };
-    initUserPositions = Array.from(engine.virtualPositions.values());
+    initUserPositions = engine.getVirtualPositions();
   } else {
     initUserBalance = {
       totalWalletBalance: 0,
