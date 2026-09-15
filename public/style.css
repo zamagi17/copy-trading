@@ -1,23 +1,27 @@
 :root {
-  --bg-primary: #0a0d14;
-  --bg-secondary: #0f1422;
-  --bg-card: rgba(18, 24, 38, 0.7);
+  --bg-primary: #070a12;
+  --bg-secondary: #0c1220;
+  --bg-card: rgba(13, 19, 35, 0.82);
   --border-card: rgba(255, 255, 255, 0.08);
-  --border-card-hover: rgba(56, 189, 248, 0.3);
+  --border-card-hover: rgba(56, 189, 248, 0.35);
 
-  --text-main: #f1f5f9;
+  --text-main: #f8fafc;
   --text-muted: #94a3b8;
   --text-dim: #64748b;
 
-  --accent-cyan: #06b6d4;
-  --accent-blue: #3b82f6;
+  --accent-cyan: #00d4ff;
+  --accent-blue: #38bdf8;
   --accent-green: #10b981;
-  --accent-red: #ef4444;
-  --accent-yellow: #f59e0b;
-  --accent-purple: #8b5cf6;
+  --accent-red: #f43f5e;
+  --accent-yellow: #fbbf24;
+  --accent-purple: #818cf8;
 
   --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+}
+
+.metric-val, .currency, .balance-amount, .data-table td, .badge {
+  font-variant-numeric: tabular-nums;
 }
 
 * {
@@ -797,7 +801,7 @@ body {
 .log-error .log-msg { color: #f87171; font-weight: 600; }
 
 /* Modal - High Performance & Zero-Lag Scrolling */
-.modal-overlay {
+.modal-overlay, .modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(4, 7, 15, 0.88);
@@ -806,38 +810,44 @@ body {
   justify-content: center;
   z-index: 100;
   padding: 20px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
-.modal-content {
+.modal-content, .modal-dialog {
   width: 100%;
   max-width: 780px;
   max-height: 88vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  padding: 0 !important;
   background: #0d1220 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 18px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
   contain: paint layout;
   transform: translateZ(0);
+  position: relative;
 }
 .modal-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  padding: 18px 24px;
+  background: #0e1424;
   border-bottom: 1px solid var(--border-card);
-  padding-bottom: 14px;
+  margin-bottom: 0;
+  z-index: 10;
 }
-.modal-title {
+.modal-title, .modal-title-group {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.modal-title h2 {
+.modal-title h2, .modal-title-group h3 {
   font-size: 1.15rem;
   font-weight: 700;
 }
@@ -846,23 +856,25 @@ body {
   height: 22px;
   color: var(--accent-cyan);
 }
-.btn-close {
+.btn-close, .btn-icon-close {
   background: transparent;
   border: none;
   color: var(--text-dim);
   font-size: 1.8rem;
   line-height: 1;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.15s, background-color 0.15s;
 }
-.btn-close:hover {
+.btn-close:hover, .btn-icon-close:hover {
   color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
-.modal-body {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
 .form-group-fieldset {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -969,14 +981,34 @@ body {
   font-weight: 900;
 }
 
+.modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .modal-footer {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-card);
+  padding: 14px 24px;
+  margin-top: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(13, 18, 32, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  position: sticky;
+  bottom: 0;
 }
 
 /* ==========================================
@@ -1013,27 +1045,30 @@ button, .btn, .custom-checkbox, select, input {
   .navbar {
     flex-direction: column;
     align-items: stretch;
-    gap: 14px;
-    padding: 14px 16px;
+    gap: 12px;
+    padding: 12px 14px;
   }
   .brand {
     justify-content: space-between;
+    width: 100%;
   }
   .nav-controls {
+    display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    width: 100%;
   }
   .nav-controls .engine-badge {
     flex: 1 1 calc(50% - 8px);
     justify-content: center;
-    padding: 8px 10px;
-    font-size: 0.75rem;
+    padding: 7px 10px;
+    font-size: 0.72rem;
   }
   .nav-controls .btn {
     flex: 1 1 calc(50% - 8px);
-    min-height: 44px;
+    min-height: 40px;
     justify-content: center;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
   }
   .nav-controls #btnPanicClose {
     flex: 1 1 100%;
@@ -1042,86 +1077,118 @@ button, .btn, .custom-checkbox, select, input {
 
   /* Cards */
   .stats-grid {
-    gap: 14px;
+    gap: 12px;
   }
   .glass-card {
-    padding: 16px;
+    padding: 14px 16px;
     border-radius: 16px;
   }
   .card-header h3 {
-    font-size: 0.95rem;
+    font-size: 0.92rem;
   }
   .balance-amount {
-    font-size: 1.85rem;
+    font-size: 1.45rem;
   }
   .metrics-row {
-    gap: 8px;
+    gap: 6px;
   }
   .metric {
-    padding: 8px 6px;
+    padding: 6px 4px;
   }
   .metric-label {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
   }
   .metric-val {
-    font-size: 0.95rem;
+    font-size: 0.88rem;
   }
   .engine-specs {
     grid-template-columns: 1fr;
     gap: 8px;
   }
 
-  /* Table & Terminal */
+  /* Table & Terminal with Sticky First Column */
   .table-responsive {
     -webkit-overflow-scrolling: touch;
-    border-radius: 10px;
+    border-radius: 12px;
     margin: 0 -4px;
+    position: relative;
   }
   .data-table th, .data-table td {
-    padding: 10px 8px;
-    font-size: 0.78rem;
+    padding: 8px 6px;
+    font-size: 0.74rem;
     white-space: nowrap;
   }
-  .terminal-body {
-    height: 320px;
-    font-size: 0.75rem;
-    padding: 12px;
+  .data-table .badge {
+    padding: 2px 6px;
+    font-size: 0.68rem;
   }
 
-  /* Modal Form */
-  .modal-overlay {
+  /* Sticky First Column: Simbol Koin tetap terlihat saat tabel digeser ke samping */
+  .data-table th:first-child,
+  .data-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: #0d1220;
+    box-shadow: 3px 0 8px rgba(0, 0, 0, 0.45);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .data-table th:first-child {
+    z-index: 4;
+    background: #0f1526;
+  }
+
+  .terminal-body {
+    height: 300px;
+    font-size: 0.72rem;
     padding: 10px;
   }
-  .modal-content {
+
+  /* Modal Form Floating Action on Mobile */
+  .modal-overlay, .modal-backdrop {
+    padding: 8px;
+  }
+  .modal-content, .modal-dialog {
     width: 100%;
-    max-height: 92vh;
-    padding: 18px 14px;
+    max-height: 94vh;
     border-radius: 16px;
+    padding: 0 !important;
+  }
+  .modal-header {
+    padding: 14px 16px;
+  }
+  .modal-body {
+    padding: 16px 14px;
+    gap: 16px;
   }
   .form-row {
     grid-template-columns: 1fr !important;
     gap: 12px;
   }
   .modal-footer {
-    flex-direction: column-reverse;
+    padding: 12px 14px;
+    flex-direction: row;
     gap: 10px;
   }
   .modal-footer .btn {
-    width: 100%;
+    flex: 1;
+    width: 50%;
     justify-content: center;
-    min-height: 44px;
+    min-height: 42px;
+    font-size: 0.82rem;
+    padding: 8px 12px;
   }
 }
 
 @media (max-width: 480px) {
   .logo-text h1 {
-    font-size: 1.05rem;
+    font-size: 1rem;
   }
   .logo-text p {
-    font-size: 0.68rem;
+    font-size: 0.65rem;
   }
   .balance-amount {
-    font-size: 1.6rem;
+    font-size: 1.35rem;
   }
   .metrics-row {
     grid-template-columns: 1fr 1fr;
@@ -1130,7 +1197,7 @@ button, .btn, .custom-checkbox, select, input {
     grid-column: span 2;
   }
   .login-box {
-    padding: 26px 18px;
+    padding: 24px 16px;
     border-radius: 16px;
   }
 }
