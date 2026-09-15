@@ -25,6 +25,7 @@ export class CopyTradeEngine {
   private lastUserPositionsCount: number = 0;
   private isHolidayActive: boolean = false;
   public virtualPositions: Map<string, UserPosition> = new Map();
+  public streamLeaderPositions: Map<string, LeadPosition> = new Map();
   public virtualWalletBalance: number = 100;
   public recentlyClosedCoins: Map<string, { symbol: string; positionSide: 'LONG' | 'SHORT'; closedAt: number; action: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
@@ -43,6 +44,7 @@ export class CopyTradeEngine {
       const data = {
         virtualWalletBalance: this.virtualWalletBalance,
         virtualPositions: Array.from(this.virtualPositions.entries()),
+        streamLeaderPositions: Array.from(this.streamLeaderPositions.entries()),
         lastProcessedOrderTime: this.lastProcessedOrderTime,
       };
       fs.writeFileSync(VIRTUAL_STATE_PATH, JSON.stringify(data, null, 2), 'utf-8');
@@ -65,11 +67,17 @@ export class CopyTradeEngine {
             }
           }
         }
+        if (Array.isArray(data.streamLeaderPositions)) {
+          this.streamLeaderPositions = new Map(data.streamLeaderPositions);
+        }
         if (typeof data.lastProcessedOrderTime === 'number' && data.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = data.lastProcessedOrderTime;
         }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual tersimpan dari disk (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
+        }
+        if (this.streamLeaderPositions.size > 0) {
+          this.log('INFO', `🔒 Memulihkan ${this.streamLeaderPositions.size} posisi leader stream (mode privat) dari disk.`);
         }
       }
     } catch {}
@@ -308,6 +316,7 @@ export class CopyTradeEngine {
 
   resetDemo() {
     this.virtualPositions.clear();
+    this.streamLeaderPositions.clear();
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
     this.logs = [];
     this.lastProcessedOrderTime = 0;
@@ -320,6 +329,12 @@ export class CopyTradeEngine {
   }
 
   getLastLeaderDetail(): LeadPortfolioDetail | null {
+    if (this.lastLeaderDetail && this.lastLeaderDetail.positionShow === false) {
+      return {
+        ...this.lastLeaderDetail,
+        positions: Array.from(this.streamLeaderPositions.values()),
+      };
+    }
     return this.lastLeaderDetail;
   }
 
@@ -328,8 +343,21 @@ export class CopyTradeEngine {
     try {
       const detail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy);
       if (detail.isSuccess) {
+        if (detail.positionShow === false) {
+          detail.positions = Array.from(this.streamLeaderPositions.values());
+        }
         this.lastLeaderDetail = detail;
         this.lastLeaderEquity = detail.totalEquity;
+        if (detail.positions && detail.positions.length > 0) {
+          for (const lp of detail.positions) {
+            if (!lp.markPrice || lp.markPrice <= 0) {
+              try {
+                const mp = await binanceClient.getSymbolPrice(lp.symbol);
+                if (mp > 0) lp.markPrice = mp;
+              } catch {}
+            }
+          }
+        }
         if (this.wsBroadcaster) {
           this.wsBroadcaster('TICK', {
             status: this.getStatus(),
@@ -658,7 +686,15 @@ export class CopyTradeEngine {
     this.consecutiveProxyErrors = 0;
 
     this.lastLeaderEquity = leaderDetail.totalEquity || this.lastLeaderEquity;
-    const currentLeaderPositions = leaderDetail.positions || [];
+    let currentLeaderPositions = leaderDetail.positions || [];
+    for (const p of currentLeaderPositions) {
+      if (!p.markPrice || p.markPrice <= 0) {
+        try {
+          const mp = await binanceClient.getSymbolPrice(p.symbol);
+          if (mp > 0) p.markPrice = mp;
+        } catch {}
+      }
+    }
 
     // Map untuk posisi leader saat ini
     const currentLeaderMap = new Map<string, LeadPosition>();
@@ -687,6 +723,9 @@ export class CopyTradeEngine {
         }
         if (markPrice > 0) {
           vp.markPrice = markPrice;
+          if (lp && (!lp.markPrice || lp.markPrice <= 0)) {
+            lp.markPrice = markPrice;
+          }
           const qty = Math.abs(vp.positionAmt);
           vp.unRealizedProfit = vp.positionSide === 'LONG'
             ? (vp.markPrice - vp.entryPrice) * qty
@@ -773,6 +812,32 @@ export class CopyTradeEngine {
 
             if (ord.action === 'OPEN') {
               this.log('INFO', `🔥 [Latest Records] Leader MEMBUKA ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Vol: ${ord.executedQty})`);
+              const posKey = `${ord.symbol}_${ord.positionSide}`;
+              const existingStream = this.streamLeaderPositions.get(posKey);
+              if (existingStream) {
+                const oldQty = existingStream.amount;
+                const newQty = oldQty + ord.executedQty;
+                const newEntry = (oldQty * existingStream.entryPrice + ord.executedQty * ord.avgPrice) / newQty;
+                existingStream.amount = newQty;
+                existingStream.entryPrice = newEntry;
+                existingStream.notional = newQty * ord.avgPrice;
+                existingStream.updateTime = ord.orderTime;
+              } else {
+                this.streamLeaderPositions.set(posKey, {
+                  symbol: ord.symbol,
+                  positionSide: ord.positionSide,
+                  amount: ord.executedQty,
+                  entryPrice: ord.avgPrice,
+                  markPrice: ord.avgPrice,
+                  leverage: 10,
+                  marginType: 'CROSSED',
+                  unrealizedProfit: 0,
+                  notional: ord.executedQty * ord.avgPrice,
+                  updateTime: ord.orderTime,
+                });
+              }
+              this.saveVirtualState();
+
               const mockPos: LeadPosition = {
                 symbol: ord.symbol,
                 positionSide: ord.positionSide,
@@ -808,6 +873,8 @@ export class CopyTradeEngine {
                   : 0;
 
                 if (isFullClose) {
+                  this.streamLeaderPositions.delete(key);
+                  this.saveVirtualState();
                   this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup Penuh)`);
                   if (this.config.paperTrading) {
                     this.virtualWalletBalance += pnl;
@@ -831,6 +898,14 @@ export class CopyTradeEngine {
                     isPaper: this.config.paperTrading,
                   });
                 } else {
+                  const existingStream = this.streamLeaderPositions.get(key);
+                  if (existingStream) {
+                    existingStream.amount = Math.max(0, existingStream.amount - ord.executedQty);
+                    if (existingStream.amount === 0) {
+                      this.streamLeaderPositions.delete(key);
+                    }
+                    this.saveVirtualState();
+                  }
                   this.log('INFO', `🎯 [Latest Records] Leader PARTIAL CLOSE ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup ${actualCloseQty})`);
                   if (this.config.paperTrading) {
                     const remainingQty = userCurrentQty - actualCloseQty;
@@ -861,6 +936,58 @@ export class CopyTradeEngine {
             }
           }
         }
+      }
+
+      // Sinkronisasi posisi leader aktif dari order stream dengan posisi akun user
+      for (const up of userPositions) {
+        const key = `${up.symbol}_${up.positionSide}`;
+        if (!this.streamLeaderPositions.has(key)) {
+          const matchOrd = orders.find(
+            (o) => o.symbol === up.symbol && o.positionSide === up.positionSide && o.action === 'OPEN' && o.avgPrice > 0
+          );
+          if (matchOrd) {
+            this.streamLeaderPositions.set(key, {
+              symbol: matchOrd.symbol,
+              positionSide: matchOrd.positionSide,
+              amount: matchOrd.executedQty,
+              entryPrice: matchOrd.avgPrice,
+              markPrice: up.markPrice || matchOrd.avgPrice,
+              leverage: up.leverage || 10,
+              marginType: 'CROSSED',
+              unrealizedProfit: 0,
+              notional: matchOrd.executedQty * (up.markPrice || matchOrd.avgPrice),
+              updateTime: matchOrd.orderTime,
+            });
+          }
+        }
+      }
+
+      // Bersihkan posisi stream jika akun user sudah tidak memiliki posisi pada koin tersebut
+      for (const key of this.streamLeaderPositions.keys()) {
+        if (!userPositionsMap.has(key)) {
+          this.streamLeaderPositions.delete(key);
+        }
+      }
+      this.saveVirtualState();
+
+      // Sinkronkan mark price & hitung floating PnL untuk streamLeaderPositions
+      for (const slp of this.streamLeaderPositions.values()) {
+        try {
+          const mp = await binanceClient.getSymbolPrice(slp.symbol);
+          if (mp > 0) {
+            slp.markPrice = mp;
+            slp.unrealizedProfit = slp.positionSide === 'LONG'
+              ? (mp - slp.entryPrice) * slp.amount
+              : (slp.entryPrice - mp) * slp.amount;
+            slp.notional = slp.amount * mp;
+          }
+        } catch {}
+      }
+
+      currentLeaderPositions = Array.from(this.streamLeaderPositions.values());
+      leaderDetail.positions = currentLeaderPositions;
+      for (const p of currentLeaderPositions) {
+        currentLeaderMap.set(`${p.symbol}_${p.positionSide}`, p);
       }
     } else {
       // =========================================================================
@@ -1082,6 +1209,7 @@ export class CopyTradeEngine {
           `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
           `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
           `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+          `📍 Harga Mark: <b>$${markPrice}</b>\n` +
           `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
           `📦 Tambahan Volume: <b>+${targetQty}</b> (Total: ${newQty.toFixed(4)})\n` +
           `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
@@ -1111,7 +1239,9 @@ export class CopyTradeEngine {
         `🚀 <b>ORDER COPY TRADE DIBUKA [🧪 SIMULASI]</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        (leaderPos.entryPrice > 0 ? `🎯 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` : '') +
         `💵 Entry: <b>$${markPrice}</b>\n` +
+        `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         `📦 Volume: <b>${targetQty}</b>\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
         `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
@@ -1139,7 +1269,9 @@ export class CopyTradeEngine {
         `🚀 <b>${title}</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        (leaderPos.entryPrice > 0 ? `🎯 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` : '') +
         `💵 Entry: <b>$${markPrice}</b>\n` +
+        `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         `📦 Volume: <b>${targetQty}</b>\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
         `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
@@ -1203,6 +1335,7 @@ export class CopyTradeEngine {
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
         `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+        `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
         `📦 Tambahan Volume: <b>+${addQty}</b> (Total: ${newQty.toFixed(4)})\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
@@ -1221,6 +1354,7 @@ export class CopyTradeEngine {
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
         `📊 Arah: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
         `💵 Harga Pasar: <b>$${markPrice}</b>\n` +
+        `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         `📦 Tambahan Volume: <b>+${addQty}</b>\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`

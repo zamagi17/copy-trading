@@ -182,7 +182,7 @@ export class CopyTradeScraper {
         }
 
         const entryPrice = Number(item.entryPrice ?? item.avgPrice ?? 0);
-        const markPrice = Number(item.markPrice ?? 0);
+        const markPrice = Number(item.markPrice ?? item.mark_price ?? item.lastPrice ?? 0);
         const unrealizedProfit = Number(item.unrealizedProfit ?? item.pnl ?? 0);
         const leverage = Number(item.leverage ?? 10);
         const marginType: 'CROSSED' | 'ISOLATED' = item.isolated || item.marginType === 'ISOLATED' ? 'ISOLATED' : 'CROSSED';
@@ -372,8 +372,8 @@ export class CopyTradeScraper {
       // Mode Publik: Hanya ambil posisi aktif yang sedang terbuka
       positions = await this.fetchPositions(id, proxy);
     } else {
-      // Mode Privat: Cukup ambil 2 order teratas (menghemat payload JSON hingga 80%)
-      orders = await this.fetchOrderHistory(id, proxy, 2);
+      // Mode Privat: Ambil 10 order teratas agar dapat merekonstruksi posisi aktif secara akurat
+      orders = await this.fetchOrderHistory(id, proxy, 10);
     }
 
     return {

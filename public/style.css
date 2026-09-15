@@ -543,6 +543,7 @@ body {
 .text-muted { color: var(--text-muted); }
 .text-dim { color: var(--text-dim); }
 .text-xs { font-size: 0.72rem; }
+.font-bold { font-weight: 700; }
 
 /* Main Workspace */
 .main-layout {

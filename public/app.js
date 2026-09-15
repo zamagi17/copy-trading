@@ -82,6 +82,8 @@ const I18N = {
     th_leader_entry: 'Entry Leader',
     th_user_pos: 'Posisi Akun Anda',
     th_user_entry: 'Entry Anda',
+    th_total_slippage: 'Total Slippage',
+    th_mark_price: 'Harga Mark',
     th_margin_used: 'Margin Terpakai',
     th_ratio: 'Rasio Akun',
     th_floating_pnl: 'Floating PnL',
@@ -330,6 +332,8 @@ const I18N = {
     th_leader_entry: 'Leader Entry',
     th_user_pos: 'Your Position',
     th_user_entry: 'Your Entry',
+    th_total_slippage: 'Total Slippage',
+    th_mark_price: 'Mark Price',
     th_margin_used: 'Used Margin',
     th_ratio: 'Account Ratio',
     th_floating_pnl: 'Floating PnL',
@@ -1293,7 +1297,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
   if (leaderList.length === 0 && userList.length === 0) {
     positionsTableBody.innerHTML = `
       <tr class="empty-row">
-        <td colspan="10">
+        <td colspan="12">
           <div class="empty-state">
             <i data-lucide="${isPrivate ? 'shield' : 'inbox'}" class="empty-icon ${isPrivate ? 'text-purple' : ''}"></i>
             <p>${isPrivate ? `<b>${t('empty_private_title', 'Mode Privat Aktif pada Leader Ini')}</b>` : t('empty_open_title', 'Leader saat ini belum memiliki posisi aktif yang terbuka.')}</p>
@@ -1348,17 +1352,33 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       syncBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>`;
     }
 
-    const ratioDisplay = (up && lp && lp.amount > 0) 
-      ? `${((Math.abs(up.positionAmt) / lp.amount) * 100).toFixed(2)}%` 
+    // Cari entry leader dan volume dari lp atau dari riwayat orders stream
+    let leaderEntryPrice = (lp && lp.entryPrice > 0) ? lp.entryPrice : 0;
+    let leaderAmount = (lp && lp.amount > 0) ? lp.amount : 0;
+
+    if (!leaderEntryPrice && Array.isArray(orders)) {
+      const openOrd = orders.find(
+        (o) => o.symbol === symbol && o.positionSide === side && o.action === 'OPEN' && o.avgPrice > 0
+      );
+      if (openOrd) {
+        leaderEntryPrice = openOrd.avgPrice;
+        if (!leaderAmount && openOrd.executedQty > 0) {
+          leaderAmount = openOrd.executedQty;
+        }
+      }
+    }
+
+    const ratioDisplay = (up && leaderAmount > 0) 
+      ? `${((Math.abs(up.positionAmt) / leaderAmount) * 100).toFixed(2)}%` 
       : (up && isPrivate ? 'Stream' : '--');
 
-    const leaderVolDisplay = lp 
-      ? `${formatQty(lp.amount)} ${symbol.replace('USDT', '')}` 
+    const leaderVolDisplay = leaderAmount > 0 
+      ? `${formatQty(leaderAmount)} ${symbol.replace('USDT', '')}` 
       : (isPrivate ? `<span class="text-dim">${currentLang === 'en' ? 'Private' : 'Privat'}</span>` : '--');
 
-    const leaderEntryDisplay = lp 
-      ? `$${formatPrice(lp.entryPrice)}` 
-      : (isPrivate && up ? `$${formatPrice(up.entryPrice)}` : '--');
+    const leaderEntryDisplay = leaderEntryPrice > 0 
+      ? `$${formatPrice(leaderEntryPrice)}` 
+      : '--';
 
     // Hitung margin terpakai
     let userMargin = 0;
@@ -1375,9 +1395,25 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
 
     let leaderMarginDisplay = '';
     let leaderMargin = 0;
-    if (lp && lp.amount > 0 && lp.entryPrice > 0) {
-      leaderMargin = (lp.amount * lp.entryPrice) / Math.max(1, lp.leverage || 10);
+    if (leaderAmount > 0 && leaderEntryPrice > 0) {
+      leaderMargin = (leaderAmount * leaderEntryPrice) / Math.max(1, leverage);
       leaderMarginDisplay = `<small class="text-dim">L: $${formatNumber(leaderMargin)}</small><br/>`;
+    }
+
+    // Hitung tampilan Harga Mark
+    const markPrice = (up && up.markPrice > 0) ? up.markPrice : (lp && lp.markPrice > 0 ? lp.markPrice : 0);
+    let markPriceDisplay = '<span class="text-muted">--</span>';
+    if (markPrice > 0) {
+      const refEntry = (up && up.entryPrice > 0) ? up.entryPrice : leaderEntryPrice;
+      let markColor = 'text-cyan';
+      if (refEntry > 0) {
+        if (side === 'LONG') {
+          markColor = markPrice >= refEntry ? 'text-green' : 'text-red';
+        } else {
+          markColor = markPrice <= refEntry ? 'text-green' : 'text-red';
+        }
+      }
+      markPriceDisplay = `<span class="${markColor} font-bold" title="${currentLang === 'en' ? 'Binance Futures Realtime Mark Price' : 'Harga Mark Realtime Binance Futures'}">$${formatPrice(markPrice)}</span>`;
     }
 
     // Hitung persentase ROI (%)
@@ -1390,10 +1426,54 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
     }
 
     let leaderRoiDisplay = '';
-    if (lp && leaderMargin > 0) {
+    if (lp && leaderMargin > 0 && typeof lp.unrealizedProfit === 'number') {
       const leaderRoi = (lp.unrealizedProfit / leaderMargin) * 100;
       const leaderRoiColor = leaderRoi >= 0 ? 'text-green' : 'text-red';
       leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${leaderRoi >= 0 ? '+' : ''}${leaderRoi.toFixed(2)}%</small><br/>`;
+    } else if (leaderMargin > 0 && leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
+      const pnl = side === 'LONG'
+        ? (markPrice - leaderEntryPrice) * leaderAmount
+        : (leaderEntryPrice - markPrice) * leaderAmount;
+      const leaderRoi = (pnl / leaderMargin) * 100;
+      const leaderRoiColor = leaderRoi >= 0 ? 'text-green' : 'text-red';
+      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${leaderRoi >= 0 ? '+' : ''}${leaderRoi.toFixed(2)}%</small><br/>`;
+    }
+
+    let leaderPnlDisplay = '';
+    if (lp && typeof lp.unrealizedProfit === 'number') {
+      const pnlColor = lp.unrealizedProfit >= 0 ? 'text-green' : 'text-red';
+      leaderPnlDisplay = `<span class="${pnlColor}">L: $${formatNumber(lp.unrealizedProfit)}</span><br/>`;
+    } else if (leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
+      const pnl = side === 'LONG'
+        ? (markPrice - leaderEntryPrice) * leaderAmount
+        : (leaderEntryPrice - markPrice) * leaderAmount;
+      const pnlColor = pnl >= 0 ? 'text-green' : 'text-red';
+      leaderPnlDisplay = `<span class="${pnlColor}">L: $${formatNumber(pnl)}</span><br/>`;
+    }
+
+    // Hitung Total Slippage antara Entry Leader dan Entry Anda
+    let slippageDisplay = '<span class="text-muted">--</span>';
+    if (leaderEntryPrice > 0 && up && up.entryPrice > 0) {
+      const priceDiff = up.entryPrice - leaderEntryPrice;
+      const slippagePct = (Math.abs(priceDiff) / leaderEntryPrice) * 100;
+      const userQty = Math.abs(up.positionAmt || 0);
+      const totalSlippageUsdt = Math.abs(priceDiff) * userQty;
+
+      // SHORT: harga jual akun Anda lebih tinggi (priceDiff > 0) = untung (favorable)
+      // LONG: harga beli akun Anda lebih rendah (priceDiff < 0) = untung (favorable)
+      const isFavorable = side === 'SHORT' ? priceDiff >= 0 : priceDiff <= 0;
+      const isZero = Math.abs(slippagePct) < 0.01;
+      const sign = isZero ? '' : (isFavorable ? '+' : '-');
+      const slipColor = isZero ? 'text-dim' : (isFavorable ? 'text-green' : 'text-red');
+
+      const slipTitle = currentLang === 'en'
+        ? `Price Diff: ${priceDiff >= 0 ? '+' : ''}$${formatPrice(priceDiff)} | Total Nominal: ${sign}$${formatNumber(totalSlippageUsdt)} USDT (${isFavorable ? 'Favorable' : 'Unfavorable'})`
+        : `Selisih Harga: ${priceDiff >= 0 ? '+' : ''}$${formatPrice(priceDiff)} | Total Nominal: ${sign}$${formatNumber(totalSlippageUsdt)} USDT (${isFavorable ? 'Menguntungkan' : 'Merugikan'})`;
+
+      slippageDisplay = `
+        <span class="${slipColor} font-bold" title="${slipTitle}">${sign}${slippagePct.toFixed(2)}%</span><br/>
+        <small class="text-dim" title="${slipTitle}">${sign}$${formatNumber(totalSlippageUsdt)} USDT</small>
+      `;
     }
 
     html += `
@@ -1403,10 +1483,12 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         <td>${leaderEntryDisplay}</td>
         <td>${up ? `${formatQty(Math.abs(up.positionAmt))} ${symbol.replace('USDT', '')}` : `<span class="text-muted">${currentLang === 'en' ? 'None' : 'Belum ada'}</span>`}</td>
         <td>${up ? `$${formatPrice(up.entryPrice)}` : '--'}</td>
+        <td>${slippageDisplay}</td>
+        <td>${markPriceDisplay}</td>
         <td>${leaderMarginDisplay}${userMarginDisplay}</td>
         <td>${ratioDisplay}</td>
         <td>
-          ${lp ? `<span class="${leaderPnlColor}">L: $${formatNumber(lp.unrealizedProfit)}</span><br/>` : ''}
+          ${leaderPnlDisplay}
           <span class="${userPnlColor}">U: ${up ? `$${formatNumber(up.unRealizedProfit)}` : '--'}</span>
         </td>
         <td>
@@ -2142,7 +2224,7 @@ async function resetDemoData() {
       `;
       positionsTableBody.innerHTML = `
         <tr class="empty-state-row">
-          <td colspan="9">
+          <td colspan="12">
             <div class="empty-state">
               <i data-lucide="inbox" class="empty-icon"></i>
               <p>${t('empty_open_title', 'Belum ada posisi yang disalin.')}</p>
