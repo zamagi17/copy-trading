@@ -155,7 +155,10 @@
           </div>
           <div class="metric">
             <span class="metric-label" data-i18n="user_unrealized_label">Unrealized PnL</span>
-            <span class="metric-val text-muted" id="userFloatingPnl">$0.00</span>
+            <div style="display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;">
+              <span class="metric-val text-muted" id="userFloatingPnl">$0.00</span>
+              <span class="badge badge-gray" id="userFloatingRoi" title="ROI Keseluruhan" style="font-size: 0.68rem; padding: 2px 6px; font-weight: 700;">0.00%</span>
+            </div>
           </div>
           <div class="metric">
             <span class="metric-label" data-i18n="user_positions_label">Posisi Terbuka</span>

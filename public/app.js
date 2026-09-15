@@ -701,6 +701,7 @@ const leaderMddVal = document.getElementById('leaderMddVal');
 const userWalletBalance = document.getElementById('userWalletBalance');
 const userAvailableBalance = document.getElementById('userAvailableBalance');
 const userFloatingPnl = document.getElementById('userFloatingPnl');
+const userFloatingRoi = document.getElementById('userFloatingRoi');
 const userOpenPositionsCount = document.getElementById('userOpenPositionsCount');
 
 // Engine Specs DOMs
@@ -1283,20 +1284,67 @@ function updateTickData(payload) {
 function updateUserAccountUI(balance, positions) {
   lastBalanceData = balance;
   lastUserPositions = positions;
+
+  let total = 0;
+  let avail = 0;
+  let pnl = 0;
+
   if (typeof balance === 'number') {
-    userWalletBalance.innerHTML = `$${formatNumber(balance)} <span class="currency">USDT</span>`;
-    userAvailableBalance.innerText = `$${formatNumber(balance)}`;
-    userFloatingPnl.innerText = `$0.00`;
-    userFloatingPnl.className = 'metric-val text-muted';
+    total = balance;
+    avail = balance;
+    pnl = 0;
   } else if (balance) {
-    const total = balance.totalWalletBalance ?? balance.totalMarginBalance ?? balance.availableBalance ?? 0;
-    const avail = balance.availableBalance ?? total;
-    userWalletBalance.innerHTML = `$${formatNumber(total)} <span class="currency">USDT</span>`;
-    userAvailableBalance.innerText = `$${formatNumber(avail)}`;
-    
-    const pnl = balance.totalUnrealizedProfit || 0;
-    userFloatingPnl.innerText = `${pnl >= 0 ? '+' : ''}$${formatNumber(pnl)}`;
-    userFloatingPnl.className = `metric-val ${pnl > 0 ? 'text-green' : pnl < 0 ? 'text-red' : 'text-muted'}`;
+    total = balance.totalWalletBalance ?? balance.totalMarginBalance ?? balance.availableBalance ?? 0;
+    avail = balance.availableBalance ?? total;
+    pnl = balance.totalUnrealizedProfit || 0;
+  }
+
+  // Fallback akumulasi PnL jika belum tercatat di balance tapi ada di daftar posisi
+  if (!pnl && Array.isArray(positions) && positions.length > 0) {
+    pnl = positions.reduce((sum, p) => sum + (Number(p.unRealizedProfit) || 0), 0);
+  }
+
+  userWalletBalance.innerHTML = `$${formatNumber(total)} <span class="currency">USDT</span>`;
+  userAvailableBalance.innerText = `$${formatNumber(avail)}`;
+
+  const isZeroPnl = Math.abs(pnl) < 0.001;
+  const pnlSign = isZeroPnl ? '' : (pnl > 0 ? '+' : '');
+  userFloatingPnl.innerText = `${pnlSign}$${formatNumber(pnl)}`;
+  userFloatingPnl.className = `metric-val ${pnl > 0 ? 'text-green' : pnl < 0 ? 'text-red' : 'text-muted'}`;
+
+  // Hitung total margin terpakai untuk menghitung ROI keseluruhan akun & posisi aktif
+  let totalUsedMargin = 0;
+  if (Array.isArray(positions)) {
+    for (const up of positions) {
+      if (typeof up.margin === 'number' && up.margin > 0) {
+        totalUsedMargin += up.margin;
+      } else {
+        const pPrice = up.entryPrice > 0 ? up.entryPrice : (up.markPrice || 0);
+        totalUsedMargin += (Math.abs(up.positionAmt) * pPrice) / Math.max(1, up.leverage || 10);
+      }
+    }
+  }
+
+  // Hitung ROI:
+  // 1. Margin ROI: persentase profit terhadap total margin posisi aktif
+  // 2. Account ROI: persentase profit terhadap total saldo akun
+  let roi = 0;
+  let accountRoi = 0;
+  if (total > 0) {
+    accountRoi = (pnl / total) * 100;
+  }
+  if (totalUsedMargin > 0) {
+    roi = (pnl / totalUsedMargin) * 100;
+  } else if (total > 0) {
+    roi = accountRoi;
+  }
+
+  if (userFloatingRoi) {
+    const isZeroRoi = Math.abs(roi) < 0.01;
+    const roiSign = isZeroRoi ? '' : (roi > 0 ? '+' : '');
+    userFloatingRoi.innerText = `${roiSign}${roi.toFixed(2)}%`;
+    userFloatingRoi.className = `badge ${roi > 0 ? 'badge-green' : roi < 0 ? 'badge-red' : 'badge-gray'}`;
+    userFloatingRoi.title = `ROI Margin Terpakai: ${roiSign}${roi.toFixed(2)}% | ROI Total Modal Akun: ${accountRoi >= 0 ? '+' : ''}${accountRoi.toFixed(2)}%`;
   }
 
   const count = positions ? positions.length : 0;
@@ -1561,6 +1609,35 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
           <span class="${userRoiColor}">U: ${userRoiDisplay}</span>
         </td>
         <td>${syncBadge}</td>
+      </tr>
+    `;
+  }
+
+  // Tambahkan baris TOTAL ringkasan di bagian bawah tabel jika ada posisi akun
+  if (userList.length > 0) {
+    let sumUserMargin = 0;
+    let sumUserPnl = 0;
+    for (const up of userList) {
+      const pPrice = up.entryPrice > 0 ? up.entryPrice : (up.markPrice || 0);
+      const m = typeof up.margin === 'number' && up.margin > 0
+        ? up.margin
+        : (Math.abs(up.positionAmt) * pPrice) / Math.max(1, up.leverage || 10);
+      sumUserMargin += m;
+      sumUserPnl += (Number(up.unRealizedProfit) || 0);
+    }
+    const sumUserRoi = sumUserMargin > 0 ? (sumUserPnl / sumUserMargin) * 100 : 0;
+    const totalPnlColor = sumUserPnl >= 0 ? 'text-green' : 'text-red';
+    const totalRoiColor = sumUserRoi >= 0 ? 'text-green' : 'text-red';
+
+    html += `
+      <tr class="table-total-row" style="background: rgba(14, 20, 36, 0.95); font-weight: 700; border-top: 2px solid rgba(255, 255, 255, 0.16);">
+        <td><span class="badge badge-purple" style="font-weight: 800; padding: 3px 8px;">TOTAL</span></td>
+        <td colspan="7" class="text-dim text-xs" style="text-align: right; padding-right: 12px;">Total Margin & Floating ROI:</td>
+        <td><span class="text-yellow font-bold">$${formatNumber(sumUserMargin)}</span> <span class="text-dim text-xs">USDT</span></td>
+        <td>--</td>
+        <td><span class="${totalPnlColor} font-bold">${sumUserPnl >= 0 ? '+' : ''}$${formatNumber(sumUserPnl)}</span></td>
+        <td><span class="badge ${sumUserRoi >= 0 ? 'badge-green' : 'badge-red'}" style="font-size: 0.72rem; font-weight: 800;">${sumUserRoi >= 0 ? '+' : ''}${sumUserRoi.toFixed(2)}%</span></td>
+        <td>--</td>
       </tr>
     `;
   }
