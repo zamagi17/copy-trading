@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import http from 'http';
@@ -394,12 +397,15 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`\n======================================================`);
   console.log(`🚀 Binance Copy Trader berjalan di: http://localhost:${PORT}`);
   console.log(`🔒 Sistem Autentikasi Admin: AKTIF`);
   console.log(`🔑 Password Default: admin123 (Dapat diubah di Settings)`);
   console.log(`======================================================\n`);
+
+  // Inisialisasi Database (PostgreSQL) dan sinkronisasi state
+  await engine.init();
 
   // Ambil snapshot data leader pertama kali saat server start
   setTimeout(() => {

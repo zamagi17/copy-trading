@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  copytrading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copytrading-bot
+    restart: always
+    environment:
+      PORT: ${PORT:-5000}
+      TZ: ${TZ:-Asia/Jakarta}
+      # Konfigurasi database dinamis diambil dari file .env di server
+      DB_HOST: ${DB_HOST:-zamagi_postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-zamagi}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-copytrading}
+    ports:
+      - "127.0.0.1:${PORT:-5000}:5000"
+    volumes:
+      # Mount config.json dari server agar settingan existing di Oracle langsung termigrasi utuh
+      - ./config.json:/app/config.json
+    networks:
+      - db_zamagi_net
+
+networks:
+  db_zamagi_net:
+    external: true

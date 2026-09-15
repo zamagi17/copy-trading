@@ -20,6 +20,8 @@ export class BinanceFuturesClient {
     this.apiKey = (apiKey || '').trim();
     this.secretKey = (secretKey || '').trim();
     this.baseUrl = isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
+    this.isDualSidePosition = null;
+    this.lastDualSideFetch = 0;
   }
 
   isConfigured(): boolean {
@@ -158,9 +160,10 @@ export class BinanceFuturesClient {
    * Membulatkan kuantitas sesuai stepSize presisi koin
    */
   roundQuantity(qty: number, stepSize: number): number {
-    if (stepSize <= 0) return qty;
+    if (stepSize <= 0 || isNaN(qty) || qty <= 0) return 0;
     const precision = Math.max(0, Math.round(-Math.log10(stepSize)));
-    const rounded = Math.floor(qty / stepSize) * stepSize;
+    const epsilon = stepSize * 1e-6;
+    const rounded = Math.floor((qty + epsilon) / stepSize) * stepSize;
     return parseFloat(rounded.toFixed(precision));
   }
 

@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.env
+*.log
+virtual_state.json
+trade_history.json
+config.json.bak
+deploy.bat

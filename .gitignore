@@ -2,10 +2,6 @@ node_modules/
 dist/
 .env
 
-Dockerfile
-.dockerignore
-docker-compose.yml
-
 # Local deployment & secret files
 deploy.bat
 *.key

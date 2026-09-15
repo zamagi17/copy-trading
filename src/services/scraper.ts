@@ -241,18 +241,33 @@ export class CopyTradeScraper {
         if (!symbol) continue;
 
         const side = String(item.side || 'BUY').toUpperCase() as 'BUY' | 'SELL';
-        const positionSide = String(item.positionSide || 'BOTH').toUpperCase() as 'LONG' | 'SHORT';
+        const rawPosSide = String(item.positionSide || 'BOTH').toUpperCase();
         const executedQty = Number(item.executedQty ?? item.qty ?? 0);
         const avgPrice = Number(item.avgPrice ?? item.price ?? 0);
-        const totalPnl = Number(item.totalPnl ?? 0);
+        const totalPnl = Number(item.totalPnl ?? item.realizedPnl ?? 0);
         const orderTime = Number(item.orderTime ?? item.orderUpdateTime ?? Date.now());
 
-        // Tentukan apakah order ini OPEN atau CLOSE
+        // Tentukan apakah order ini OPEN atau CLOSE serta normalisasikan positionSide ke LONG / SHORT
+        let positionSide: 'LONG' | 'SHORT' = 'LONG';
         let action: 'OPEN' | 'CLOSE' = 'OPEN';
-        if (positionSide === 'SHORT') {
+
+        if (rawPosSide === 'SHORT') {
+          positionSide = 'SHORT';
           action = side === 'SELL' ? 'OPEN' : 'CLOSE';
-        } else if (positionSide === 'LONG') {
+        } else if (rawPosSide === 'LONG') {
+          positionSide = 'LONG';
           action = side === 'BUY' ? 'OPEN' : 'CLOSE';
+        } else {
+          // Mode One-Way (positionSide bernilai 'BOTH' atau tidak didefinisikan)
+          const hasRealizedPnl = Math.abs(totalPnl) > 0.0001;
+          if (hasRealizedPnl) {
+            action = 'CLOSE';
+            // Pada One-Way mode: order SELL yang menghasilkan Realized PnL menutup posisi LONG, order BUY menutup posisi SHORT
+            positionSide = side === 'SELL' ? 'LONG' : 'SHORT';
+          } else {
+            action = 'OPEN';
+            positionSide = side === 'BUY' ? 'LONG' : 'SHORT';
+          }
         }
 
         orders.push({
