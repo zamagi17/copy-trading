@@ -9,7 +9,7 @@
   "mode": "RATIO_EQUITY",
   "ratioMultiplier": 1,
   "fixedAmountUsdt": 25,
-  "maxModalPerCoin": 100,
+  "maxModalPerCoin": 0,
   "maxSlippagePct": 0.5,
   "syncLeverage": true,
   "emergencySlPct": 80,

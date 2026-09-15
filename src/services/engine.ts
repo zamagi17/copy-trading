@@ -214,7 +214,7 @@ export class CopyTradeEngine {
       mode: 'RATIO_EQUITY',
       ratioMultiplier: 1.0,
       fixedAmountUsdt: 25.0,
-      maxModalPerCoin: 50.0,
+      maxModalPerCoin: 0,
       maxSlippagePct: 0.5,
       syncLeverage: true,
       emergencySlPct: 10.0,
@@ -1214,11 +1214,12 @@ export class CopyTradeEngine {
       targetQty = leaderPos.amount * equityRatio;
     }
 
-    // Terapkan Safety Cap (Maksimal modal per koin)
-    const notional = targetQty * markPrice;
-    if (this.config.maxModalPerCoin > 0 && notional > this.config.maxModalPerCoin) {
-      targetQty = this.config.maxModalPerCoin / markPrice;
-      this.log('INFO', `🛡️ Safety Cap Aktif: Volume ${leaderPos.symbol} dibatasi ke nominal maksimal $${this.config.maxModalPerCoin} USDT`);
+    // Terapkan Safety Cap (Maksimal modal margin per koin jika diset > 0)
+    const lev = Math.max(1, leaderPos.leverage || 10);
+    const estMargin = (targetQty * markPrice) / lev;
+    if (this.config.maxModalPerCoin > 0 && estMargin > this.config.maxModalPerCoin) {
+      targetQty = (this.config.maxModalPerCoin * lev) / markPrice;
+      this.log('INFO', `🛡️ Safety Cap Aktif: Margin ${leaderPos.symbol} dibatasi ke nominal maksimal $${this.config.maxModalPerCoin} USDT`);
     }
 
     // Normalisasi presisi lot
@@ -1358,12 +1359,14 @@ export class CopyTradeEngine {
     const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
     const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
 
-    // Safety Cap check
-    const currentNotional = (userCurrentQty + addQty) * markPrice;
-    if (this.config.maxModalPerCoin > 0 && currentNotional > this.config.maxModalPerCoin) {
-      addQty = Math.max(0, (this.config.maxModalPerCoin - userCurrentQty * markPrice) / markPrice);
+    // Safety Cap check berdasarkan Margin modal
+    const lev = Math.max(1, leaderPos.leverage || 10);
+    const currentMargin = ((userCurrentQty + addQty) * markPrice) / lev;
+    if (this.config.maxModalPerCoin > 0 && currentMargin > this.config.maxModalPerCoin) {
+      const maxNotional = this.config.maxModalPerCoin * lev;
+      addQty = Math.max(0, (maxNotional - userCurrentQty * markPrice) / markPrice);
       if (addQty <= 0) {
-        this.log('WARN', `🛡️ Safety Cap Tercapai untuk ${leaderPos.symbol}. Tidak menambah posisi lagi.`);
+        this.log('WARN', `🛡️ Safety Cap Tercapai untuk ${leaderPos.symbol} (Maks Margin: $${this.config.maxModalPerCoin} USDT). Tidak menambah posisi lagi.`);
         return;
       }
     }

@@ -154,7 +154,8 @@ const I18N = {
     hint_polling_interval: 'Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).',
     legend_safety: 'Safety Guard & Manajemen Risiko',
     label_max_modal: 'Safety Cap (Maksimal Margin per Koin USDT):',
-    hint_max_modal: 'Mencegah modal habis jika leader melakukan averaging terus-menerus.',
+    hint_max_modal: 'Isi 0 untuk NONAKTIF (Rekomendasi: 100% Murni Proporsional Rasio Binance). Isi nominal (misal 50) jika ingin membatasi margin maksimal per koin.',
+    spec_safety_cap_unlimited: 'Nonaktif (Murni Rasio)',
     label_max_slippage: 'Toleransi Slippage Maksimal (%):',
     hint_max_slippage: 'Batalkan order jika harga sudah lari > toleransi dari entry leader.',
     label_emergency_sl: 'Emergency Stop Loss Akun (%):',
@@ -405,7 +406,8 @@ const I18N = {
     hint_polling_interval: 'Frequency bot polls Binance for new leader transactions (in milliseconds).',
     legend_safety: 'Safety Guard & Risk Management',
     label_max_modal: 'Safety Cap (Max Margin per Coin USDT):',
-    hint_max_modal: 'Prevents account wipeout if leader aggressively averages down.',
+    hint_max_modal: 'Set to 0 to DISABLE (Recommended: 100% Pure Binance Ratio). Enter an amount if you want to cap max margin per coin.',
+    spec_safety_cap_unlimited: 'Disabled (Pure Ratio)',
     label_max_slippage: 'Max Slippage Tolerance (%):',
     hint_max_slippage: 'Cancel order if market price deviates > tolerance from leader entry.',
     label_emergency_sl: 'Account Emergency Stop Loss (%):',
@@ -1138,7 +1140,20 @@ function updateConfigSpecs(cfg) {
   }
 
   // 3. Safety Cap & Slippage Guard
-  if (specSafetyCap) specSafetyCap.innerText = `$${Number(cfg.maxModalPerCoin || 50).toFixed(2)} USDT`;
+  if (specSafetyCap) {
+    const val = Number(cfg.maxModalPerCoin || 0);
+    if (val <= 0) {
+      specSafetyCap.innerText = t('spec_safety_cap_unlimited', 'Nonaktif (Murni Rasio)');
+      specSafetyCap.className = 'spec-value text-green';
+      specSafetyCap.title = currentLang === 'en'
+        ? 'Safety Cap Disabled: 100% Pure Binance Proportional Ratio'
+        : 'Safety Cap Nonaktif: 100% Murni Proporsional Rasio Binance';
+    } else {
+      specSafetyCap.innerText = `$${val.toFixed(2)} USDT`;
+      specSafetyCap.className = 'spec-value text-yellow';
+      specSafetyCap.title = currentLang === 'en' ? `Safety Cap: Max $${val} USDT margin per coin` : `Batas Maksimal Margin: $${val} USDT per koin`;
+    }
+  }
   if (specSlippage) specSlippage.innerText = `${Number(cfg.maxSlippagePct || 0.5).toFixed(2)}% Max`;
 
   // 4. Polling Jitter Interval
@@ -1799,7 +1814,7 @@ function openSettingsModal() {
   if (selectPollingInterval) selectPollingInterval.value = currentConfig.pollingIntervalMs || 1500;
   inputRatioMultiplier.value = currentConfig.ratioMultiplier ?? 1.0;
   inputFixedAmount.value = currentConfig.fixedAmountUsdt ?? 25;
-  inputMaxModalPerCoin.value = currentConfig.maxModalPerCoin ?? 50;
+  inputMaxModalPerCoin.value = currentConfig.maxModalPerCoin ?? 0;
   inputMaxSlippage.value = currentConfig.maxSlippagePct ?? 0.5;
   inputEmergencySl.value = currentConfig.emergencySlPct ?? 10;
   checkSyncLeverage.checked = currentConfig.syncLeverage ?? true;
@@ -2086,7 +2101,7 @@ async function saveSettings() {
     },
     ratioMultiplier: parseFloat(inputRatioMultiplier.value) || 1.0,
     fixedAmountUsdt: parseFloat(inputFixedAmount.value) || 25,
-    maxModalPerCoin: parseFloat(inputMaxModalPerCoin.value) || 50,
+    maxModalPerCoin: !isNaN(parseFloat(inputMaxModalPerCoin.value)) ? Math.max(0, parseFloat(inputMaxModalPerCoin.value)) : 0,
     maxSlippagePct: parseFloat(inputMaxSlippage.value) || 0.5,
     emergencySlPct: parseFloat(inputEmergencySl.value) || 10,
     syncLeverage: checkSyncLeverage.checked,
