@@ -2,13 +2,14 @@ import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { AppConfig, ClosedTrade } from '../types';
+import { AppConfig, ClosedTrade, DailyBalanceSnapshot } from '../types';
 
 dotenv.config();
 
 const CONFIG_PATH = path.resolve(__dirname, '../../config.json');
 const VIRTUAL_STATE_PATH = path.resolve(__dirname, '../../virtual_state.json');
 const TRADE_HISTORY_PATH = path.resolve(__dirname, '../../trade_history.json');
+const DAILY_SNAPSHOTS_PATH = path.resolve(__dirname, '../../daily_snapshots.json');
 
 export class DatabaseService {
   private pool: Pool | null = null;
@@ -106,6 +107,26 @@ export class DatabaseService {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
           CREATE INDEX IF NOT EXISTS idx_trade_history_timestamp ON trade_history (timestamp DESC);
+        `);
+
+        // 4. Tabel Rekap Saldo Harian (Midnight 00:00 WIB)
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS daily_balance_snapshots (
+            date VARCHAR(16) PRIMARY KEY,
+            wallet_balance NUMERIC NOT NULL,
+            margin_balance NUMERIC NOT NULL,
+            available_balance NUMERIC NOT NULL,
+            unrealized_pnl NUMERIC DEFAULT 0,
+            realized_pnl_today NUMERIC DEFAULT 0,
+            trades_count_today INT DEFAULT 0,
+            win_count_today INT DEFAULT 0,
+            loss_count_today INT DEFAULT 0,
+            win_rate_today NUMERIC DEFAULT 0,
+            open_positions_count INT DEFAULT 0,
+            timestamp BIGINT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_daily_balance_snapshots_date ON daily_balance_snapshots (date DESC);
         `);
 
         this.isConnected = true;
@@ -281,6 +302,82 @@ export class DatabaseService {
           isPaper: Boolean(r.isPaper),
         }));
         fs.writeFileSync(TRADE_HISTORY_PATH, JSON.stringify(mergedList, null, 2), 'utf-8');
+      }
+
+      // 4. REKONSILIASI REKAP SALDO HARIAN (daily_balance_snapshots)
+      let localSnapshots: DailyBalanceSnapshot[] = [];
+      if (fs.existsSync(DAILY_SNAPSHOTS_PATH)) {
+        try {
+          const raw = fs.readFileSync(DAILY_SNAPSHOTS_PATH, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) localSnapshots = parsed;
+        } catch {}
+      }
+
+      if (localSnapshots.length > 0) {
+        for (const s of localSnapshots) {
+          if (!s.date) continue;
+          await client.query(
+            `INSERT INTO daily_balance_snapshots (
+               date, wallet_balance, margin_balance, available_balance, unrealized_pnl,
+               realized_pnl_today, trades_count_today, win_count_today, loss_count_today,
+               win_rate_today, open_positions_count, timestamp, created_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
+             ON CONFLICT (date) DO NOTHING;`,
+            [
+              s.date,
+              s.walletBalance,
+              s.marginBalance,
+              s.availableBalance,
+              s.unrealizedPnl,
+              s.realizedPnlToday,
+              s.tradesCountToday,
+              s.winCountToday,
+              s.lossCountToday,
+              s.winRateToday,
+              s.openPositionsCount,
+              s.timestamp,
+            ]
+          );
+        }
+      }
+
+      const snapRes = await client.query(
+        `SELECT date,
+                wallet_balance::numeric AS "walletBalance",
+                margin_balance::numeric AS "marginBalance",
+                available_balance::numeric AS "availableBalance",
+                unrealized_pnl::numeric AS "unrealizedPnl",
+                realized_pnl_today::numeric AS "realizedPnlToday",
+                trades_count_today AS "tradesCountToday",
+                win_count_today AS "winCountToday",
+                loss_count_today AS "lossCountToday",
+                win_rate_today::numeric AS "winRateToday",
+                open_positions_count AS "openPositionsCount",
+                timestamp,
+                created_at AS "createdAt"
+         FROM daily_balance_snapshots
+         ORDER BY date DESC
+         LIMIT 60;`
+      );
+      if (snapRes.rows.length > 0) {
+        const mergedSnaps = snapRes.rows.map((r: any) => ({
+          ...r,
+          walletBalance: Number(r.walletBalance),
+          marginBalance: Number(r.marginBalance),
+          availableBalance: Number(r.availableBalance),
+          unrealizedPnl: Number(r.unrealizedPnl),
+          realizedPnlToday: Number(r.realizedPnlToday),
+          tradesCountToday: Number(r.tradesCountToday),
+          winCountToday: Number(r.winCountToday),
+          lossCountToday: Number(r.lossCountToday),
+          winRateToday: Number(r.winRateToday),
+          openPositionsCount: Number(r.openPositionsCount),
+          timestamp: Number(r.timestamp),
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
+        }));
+        fs.writeFileSync(DAILY_SNAPSHOTS_PATH, JSON.stringify(mergedSnaps, null, 2), 'utf-8');
       }
     } catch (e: any) {
       console.warn('[Database] Catatan rekonsiliasi data:', e.message);
@@ -501,6 +598,132 @@ export class DatabaseService {
         await this.pool.query('TRUNCATE TABLE trade_history;');
       } catch (e: any) {
         console.error('[Database] Gagal hapus riwayat trade dari DB:', e.message);
+      }
+    }
+  }
+
+  // ==========================================
+  // DAILY BALANCE SNAPSHOTS CRUD
+  // ==========================================
+  async loadDailySnapshots(limit: number = 60): Promise<DailyBalanceSnapshot[]> {
+    if (this.isConnected && this.pool) {
+      try {
+        const res = await this.pool.query(
+          `SELECT date,
+                  wallet_balance::numeric AS "walletBalance",
+                  margin_balance::numeric AS "marginBalance",
+                  available_balance::numeric AS "availableBalance",
+                  unrealized_pnl::numeric AS "unrealizedPnl",
+                  realized_pnl_today::numeric AS "realizedPnlToday",
+                  trades_count_today AS "tradesCountToday",
+                  win_count_today AS "winCountToday",
+                  loss_count_today AS "lossCountToday",
+                  win_rate_today::numeric AS "winRateToday",
+                  open_positions_count AS "openPositionsCount",
+                  timestamp,
+                  created_at AS "createdAt"
+           FROM daily_balance_snapshots
+           ORDER BY date DESC
+           LIMIT $1;`,
+          [limit]
+        );
+        return res.rows.map((r: any) => ({
+          ...r,
+          walletBalance: Number(r.walletBalance),
+          marginBalance: Number(r.marginBalance),
+          availableBalance: Number(r.availableBalance),
+          unrealizedPnl: Number(r.unrealizedPnl),
+          realizedPnlToday: Number(r.realizedPnlToday),
+          tradesCountToday: Number(r.tradesCountToday),
+          winCountToday: Number(r.winCountToday),
+          lossCountToday: Number(r.lossCountToday),
+          winRateToday: Number(r.winRateToday),
+          openPositionsCount: Number(r.openPositionsCount),
+          timestamp: Number(r.timestamp),
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
+        }));
+      } catch (e: any) {
+        console.warn('[Database] Gagal baca daily_balance_snapshots dari DB, fallback JSON:', e.message);
+      }
+    }
+
+    // Fallback ke file JSON jika DB offline
+    if (fs.existsSync(DAILY_SNAPSHOTS_PATH)) {
+      try {
+        const raw = fs.readFileSync(DAILY_SNAPSHOTS_PATH, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.slice(0, limit);
+        }
+      } catch {}
+    }
+    return [];
+  }
+
+  async saveDailySnapshot(snapshot: DailyBalanceSnapshot): Promise<void> {
+    // 1. Simpan ke local JSON fallback selalu
+    try {
+      let existing: DailyBalanceSnapshot[] = [];
+      if (fs.existsSync(DAILY_SNAPSHOTS_PATH)) {
+        try {
+          const raw = fs.readFileSync(DAILY_SNAPSHOTS_PATH, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) existing = parsed;
+        } catch {}
+      }
+      const idx = existing.findIndex((s) => s.date === snapshot.date);
+      if (idx >= 0) {
+        existing[idx] = { ...existing[idx], ...snapshot };
+      } else {
+        existing.unshift(snapshot);
+      }
+      // Urutkan tanggal descending
+      existing.sort((a, b) => b.date.localeCompare(a.date));
+      fs.writeFileSync(DAILY_SNAPSHOTS_PATH, JSON.stringify(existing, null, 2), 'utf-8');
+    } catch (err: any) {
+      console.warn('[Database] Gagal simpan daily_snapshots.json fallback:', err.message);
+    }
+
+    // 2. Simpan ke PostgreSQL jika terhubung
+    if (this.isConnected && this.pool) {
+      try {
+        await this.pool.query(
+          `INSERT INTO daily_balance_snapshots (
+             date, wallet_balance, margin_balance, available_balance, unrealized_pnl,
+             realized_pnl_today, trades_count_today, win_count_today, loss_count_today,
+             win_rate_today, open_positions_count, timestamp, created_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
+           ON CONFLICT (date) DO UPDATE SET
+             wallet_balance = EXCLUDED.wallet_balance,
+             margin_balance = EXCLUDED.margin_balance,
+             available_balance = EXCLUDED.available_balance,
+             unrealized_pnl = EXCLUDED.unrealized_pnl,
+             realized_pnl_today = EXCLUDED.realized_pnl_today,
+             trades_count_today = EXCLUDED.trades_count_today,
+             win_count_today = EXCLUDED.win_count_today,
+             loss_count_today = EXCLUDED.loss_count_today,
+             win_rate_today = EXCLUDED.win_rate_today,
+             open_positions_count = EXCLUDED.open_positions_count,
+             timestamp = EXCLUDED.timestamp,
+             created_at = CURRENT_TIMESTAMP;`,
+          [
+            snapshot.date,
+            snapshot.walletBalance,
+            snapshot.marginBalance,
+            snapshot.availableBalance,
+            snapshot.unrealizedPnl,
+            snapshot.realizedPnlToday,
+            snapshot.tradesCountToday,
+            snapshot.winCountToday,
+            snapshot.lossCountToday,
+            snapshot.winRateToday,
+            snapshot.openPositionsCount,
+            snapshot.timestamp,
+          ]
+        );
+      } catch (e: any) {
+        console.error('[Database] Gagal simpan daily snapshot ke PostgreSQL:', e.message);
       }
     }
   }

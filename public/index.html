@@ -150,7 +150,13 @@
             <i data-lucide="wallet" class="card-icon text-cyan"></i>
             <h3 data-i18n="user_card_title">Akun Binance Futures Anda</h3>
           </div>
-          <span class="badge badge-purple" id="accountModeBadge">SIMULASI DEMO</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-xs btn-outline-cyan" id="btnOpenDailySnapshots" onclick="openDailySnapshotsModal()" title="Lihat Rekap Saldo Jam 12 Malam (00:00 WIB)" style="padding: 4px 10px; font-size: 0.72rem; border-radius: 12px; border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; background: rgba(56, 189, 248, 0.08); display: flex; align-items: center; gap: 5px; cursor: pointer; transition: all 0.2s ease;">
+              <i data-lucide="history" style="width: 12px; height: 12px;"></i>
+              <span>Riwayat 00:00</span>
+            </button>
+            <span class="badge badge-purple" id="accountModeBadge">SIMULASI DEMO</span>
+          </div>
         </div>
 
         <div class="balance-showcase">
@@ -947,6 +953,75 @@
     </div>
   </div>
 
+  <!-- Daily Balance Snapshots Modal (00:00 WIB) -->
+  <div class="modal-backdrop" id="dailySnapshotsModal" style="display: none;">
+    <div class="modal-dialog glass-card" style="max-width: 860px; width: 95%;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <i data-lucide="calendar-check-2" class="card-icon text-cyan"></i>
+          <div>
+            <h3 style="margin: 0; font-size: 1.1rem; color: #f8fafc;">Rekap Saldo Harian (00:00 WIB)</h3>
+            <span style="font-size: 0.75rem; color: #94a3b8;">Tersimpan otomatis ke database setiap tengah malam jam 12 (00:00 WIB) untuk pelacakan performa portofolio</span>
+          </div>
+        </div>
+        <button class="btn-icon-close" onclick="closeDailySnapshotsModal()">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top: 14px; max-height: 75vh; overflow-y: auto;">
+        <!-- Top Action & Stat Bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.07);">
+          <div style="font-size: 0.82rem; color: #cbd5e1; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="database" style="width: 14px; height: 14px; color: #38bdf8;"></i>
+            <span>Penyimpanan: <strong id="dailySnapshotsDbStatus" style="color: #34d399;">PostgreSQL + JSON</strong></span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm btn-primary" id="btnTakeManualSnapshot" onclick="triggerManualDailySnapshot()" style="background: #0284c7; border-color: #0369a1; font-size: 0.78rem; padding: 6px 12px; display: flex; align-items: center; gap: 6px;">
+              <i data-lucide="camera" style="width: 13px; height: 13px;"></i>
+              <span>Ambil Snapshot Sekarang</span>
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="loadDailySnapshotsData()" style="font-size: 0.78rem; padding: 6px 10px;" title="Refresh Data">
+              <i data-lucide="refresh-cw" style="width: 13px; height: 13px;"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Feedback Alert Box -->
+        <div id="dailySnapshotAlertBox" style="display: none; margin-bottom: 14px; padding: 10px 14px; border-radius: 8px; font-size: 0.8rem;"></div>
+
+        <!-- Snapshots Table -->
+        <div class="table-responsive" style="overflow-x: auto; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;">
+          <table class="data-table" id="dailySnapshotsTable" style="width: 100%; font-size: 0.82rem; border-collapse: collapse;">
+            <thead>
+              <tr style="background: rgba(15, 23, 42, 0.7); border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: #94a3b8; text-align: left;">
+                <th style="padding: 10px;">Tanggal (WIB)</th>
+                <th style="padding: 10px;">Total Wallet</th>
+                <th style="padding: 10px;">Total Margin</th>
+                <th style="padding: 10px;">Saldo Tersedia</th>
+                <th style="padding: 10px;">Floating PnL</th>
+                <th style="padding: 10px;">PnL Hari Itu</th>
+                <th style="padding: 10px;">Trade Selesai</th>
+                <th style="padding: 10px;">Win Rate</th>
+                <th style="padding: 10px;">Posisi</th>
+              </tr>
+            </thead>
+            <tbody id="dailySnapshotsTableBody">
+              <tr>
+                <td colspan="9" style="text-align: center; padding: 24px; color: #64748b;">Memuat data snapshot harian...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.75rem; color: #64748b;">Notifikasi rekap Telegram otomatis dikirim setiap jam 00:00 WIB</span>
+        <button class="btn btn-secondary" onclick="closeDailySnapshotsModal()">Tutup</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Login Security Overlay -->
   <div class="login-overlay" id="loginOverlay" style="display: none;">
     <div class="login-box glass-card">
@@ -973,7 +1048,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.5"></script>
+  <script src="app.js?v=2.6"></script>
   <script>
     lucide.createIcons();
   </script>

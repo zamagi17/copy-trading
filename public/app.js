@@ -2741,3 +2741,155 @@ async function resetScheduleAbortManual() {
     alert('❌ Error: ' + err.message);
   }
 }
+
+// ==========================================
+// DAILY BALANCE SNAPSHOTS (00:00 WIB)
+// ==========================================
+const dailySnapshotsModal = document.getElementById('dailySnapshotsModal');
+const dailySnapshotsTableBody = document.getElementById('dailySnapshotsTableBody');
+const dailySnapshotAlertBox = document.getElementById('dailySnapshotAlertBox');
+const btnTakeManualSnapshot = document.getElementById('btnTakeManualSnapshot');
+
+async function openDailySnapshotsModal() {
+  if (!dailySnapshotsModal) return;
+  if (dailySnapshotAlertBox) {
+    dailySnapshotAlertBox.style.display = 'none';
+    dailySnapshotAlertBox.innerText = '';
+  }
+  dailySnapshotsModal.style.display = 'flex';
+  lucide.createIcons({ root: dailySnapshotsModal });
+  await loadDailySnapshotsData();
+}
+
+function closeDailySnapshotsModal() {
+  if (dailySnapshotsModal) {
+    dailySnapshotsModal.style.display = 'none';
+  }
+}
+
+async function loadDailySnapshotsData() {
+  if (!dailySnapshotsTableBody) return;
+  dailySnapshotsTableBody.innerHTML = `
+    <tr>
+      <td colspan="9" style="text-align: center; padding: 24px; color: #64748b;">
+        <i data-lucide="loader" class="spin" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 6px;"></i>
+        Memuat data snapshot harian...
+      </td>
+    </tr>
+  `;
+  lucide.createIcons({ root: dailySnapshotsTableBody });
+
+  try {
+    const res = await apiFetch('/api/daily-snapshots?days=60');
+    const json = await res.json();
+
+    if (!json.success || !Array.isArray(json.data) || json.data.length === 0) {
+      dailySnapshotsTableBody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align: center; padding: 28px; color: #94a3b8;">
+            <div style="font-size: 0.9rem; margin-bottom: 6px;">Belum ada snapshot saldo tersimpan.</div>
+            <div style="font-size: 0.75rem; color: #64748b;">Snapshot otomatis diambil setiap jam 12 malam (00:00 WIB), atau Anda dapat menekan tombol <strong>"Ambil Snapshot Sekarang"</strong> di atas.</div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let rowsHtml = '';
+    for (const snap of json.data) {
+      const pnl = Number(snap.realizedPnlToday || 0);
+      const isProfit = pnl >= 0;
+      const pnlColor = isProfit ? '#34d399' : '#f87171';
+      const pnlSign = isProfit ? '+' : '';
+
+      const uPnl = Number(snap.unrealizedPnl || 0);
+      const uPnlColor = uPnl > 0 ? '#34d399' : uPnl < 0 ? '#f87171' : '#94a3b8';
+      const uPnlSign = uPnl >= 0 ? '+' : '';
+
+      const winRate = Number(snap.winRateToday || 0);
+      const winRateBadge = winRate >= 50 ? 'badge-green' : winRate > 0 ? 'badge-yellow' : 'badge-gray';
+
+      rowsHtml += `
+        <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
+          <td style="padding: 10px; font-weight: 700; color: #f1f5f9;">
+            <i data-lucide="calendar" style="width: 12px; height: 12px; vertical-align: middle; margin-right: 4px; color: #38bdf8;"></i>
+            ${snap.date}
+          </td>
+          <td style="padding: 10px; font-weight: 600; color: #e2e8f0;">$${Number(snap.walletBalance || 0).toFixed(2)}</td>
+          <td style="padding: 10px; font-weight: 600; color: #38bdf8;">$${Number(snap.marginBalance || 0).toFixed(2)}</td>
+          <td style="padding: 10px; color: #cbd5e1;">$${Number(snap.availableBalance || 0).toFixed(2)}</td>
+          <td style="padding: 10px; font-weight: 600; color: ${uPnlColor};">${uPnlSign}$${uPnl.toFixed(2)}</td>
+          <td style="padding: 10px; font-weight: 700; color: ${pnlColor};">${pnlSign}$${pnl.toFixed(2)}</td>
+          <td style="padding: 10px; color: #cbd5e1;">
+            ${snap.tradesCountToday || 0} trade
+            <span style="font-size: 0.72rem; color: #94a3b8;">(${snap.winCountToday || 0}W / ${snap.lossCountToday || 0}L)</span>
+          </td>
+          <td style="padding: 10px;">
+            <span class="badge ${winRateBadge}" style="font-size: 0.7rem; padding: 2px 6px;">${winRate.toFixed(1)}%</span>
+          </td>
+          <td style="padding: 10px; color: #94a3b8;">${snap.openPositionsCount || 0} posisi</td>
+        </tr>
+      `;
+    }
+
+    dailySnapshotsTableBody.innerHTML = rowsHtml;
+    lucide.createIcons({ root: dailySnapshotsTableBody });
+  } catch (err) {
+    dailySnapshotsTableBody.innerHTML = `
+      <tr>
+        <td colspan="9" style="text-align: center; padding: 20px; color: #f87171;">
+          Gagal memuat snapshot harian: ${err.message}
+        </td>
+      </tr>
+    `;
+  }
+}
+
+async function triggerManualDailySnapshot() {
+  if (!btnTakeManualSnapshot) return;
+  const originalText = btnTakeManualSnapshot.innerHTML;
+  btnTakeManualSnapshot.disabled = true;
+  btnTakeManualSnapshot.innerHTML = `<i data-lucide="loader" class="spin" style="width: 13px; height: 13px;"></i> Menyimpan...`;
+  lucide.createIcons({ root: btnTakeManualSnapshot });
+
+  if (dailySnapshotAlertBox) {
+    dailySnapshotAlertBox.style.display = 'none';
+  }
+
+  try {
+    const res = await apiFetch('/api/daily-snapshots/take', { method: 'POST' });
+    const json = await res.json();
+
+    if (json.success) {
+      if (dailySnapshotAlertBox) {
+        dailySnapshotAlertBox.style.display = 'block';
+        dailySnapshotAlertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        dailySnapshotAlertBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        dailySnapshotAlertBox.style.color = '#34d399';
+        dailySnapshotAlertBox.innerHTML = `✅ <strong>Berhasil!</strong> ${json.message}`;
+      }
+      appendLog('SUCCESS', `💾 ${json.message}`);
+      await loadDailySnapshotsData();
+    } else {
+      if (dailySnapshotAlertBox) {
+        dailySnapshotAlertBox.style.display = 'block';
+        dailySnapshotAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        dailySnapshotAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        dailySnapshotAlertBox.style.color = '#f87171';
+        dailySnapshotAlertBox.innerHTML = `❌ <strong>Gagal:</strong> ${json.message}`;
+      }
+    }
+  } catch (err) {
+    if (dailySnapshotAlertBox) {
+      dailySnapshotAlertBox.style.display = 'block';
+      dailySnapshotAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+      dailySnapshotAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+      dailySnapshotAlertBox.style.color = '#f87171';
+      dailySnapshotAlertBox.innerHTML = `❌ <strong>Error:</strong> ${err.message}`;
+    }
+  } finally {
+    btnTakeManualSnapshot.disabled = false;
+    btnTakeManualSnapshot.innerHTML = originalText;
+    lucide.createIcons({ root: btnTakeManualSnapshot });
+  }
+}

@@ -8,5 +8,6 @@ deploy.bat
 *.pem
 virtual_state.json
 trade_history.json
+daily_snapshots.json
 config.json.bak
 

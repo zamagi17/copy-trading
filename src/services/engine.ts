@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus, DailyScheduleConfig, DailyScheduleStatus } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus, DailyScheduleConfig, DailyScheduleStatus, DailyBalanceSnapshot } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 import { telegramService } from './telegram';
@@ -36,6 +36,8 @@ export class CopyTradeEngine {
   private scheduleAbortedAt: number = 0;
   private lastUserBalance: BalanceInfo | null = null;
   private lastUserPositions: UserPosition[] = [];
+  private lastMidnightSnapshotDate: string = '';
+  private midnightSchedulerTimer: NodeJS.Timeout | null = null;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public streamLeaderPositions: Map<string, LeadPosition> = new Map();
   public positionAvgCounts: Map<string, { leader: number; user: number }> = new Map();
@@ -143,6 +145,18 @@ export class CopyTradeEngine {
         }
       }).catch(() => {});
     }
+
+    // 4. Inisialisasi Scheduler Snapshot Saldo Jam 12 Malam (00:00 WIB)
+    if (this.midnightSchedulerTimer) {
+      clearInterval(this.midnightSchedulerTimer);
+    }
+    this.midnightSchedulerTimer = setInterval(() => {
+      this.checkDailyMidnightSnapshot().catch(() => {});
+    }, 30000);
+
+    setTimeout(() => {
+      this.checkDailyMidnightSnapshot().catch(() => {});
+    }, 5000);
   }
 
   private saveVirtualState() {
@@ -641,6 +655,148 @@ export class CopyTradeEngine {
       return this.virtualPositions.size;
     }
     return this.lastUserPositionsCount;
+  }
+
+  /**
+   * Mengembalikan tanggal dalam format "YYYY-MM-DD" pada zona waktu Waktu Indonesia Barat (WIB, UTC+7)
+   */
+  public getWibDate(dateObj?: Date): string {
+    const d = dateObj || new Date();
+    const utcEpoch = d.getTime();
+    const wibEpoch = utcEpoch + (7 * 3600000);
+    const wibDate = new Date(wibEpoch);
+    const y = wibDate.getUTCFullYear();
+    const m = String(wibDate.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(wibDate.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  /**
+   * Mengembalikan tanggal kemarin dalam format "YYYY-MM-DD" pada zona waktu WIB
+   */
+  public getYesterdayWibDate(): string {
+    const d = new Date();
+    const yesterdayEpoch = d.getTime() - (24 * 3600000);
+    return this.getWibDate(new Date(yesterdayEpoch));
+  }
+
+  /**
+   * Mengambil snapshot saldo harian dan performa trading, menyimpan ke database dan fallback JSON
+   */
+  public async takeDailyBalanceSnapshot(targetDate?: string, sendAlert: boolean = false): Promise<DailyBalanceSnapshot> {
+    const dateStr = targetDate || this.getWibDate();
+
+    // 1. Dapatkan saldo akun dan posisi user terkini
+    const acct = this.getLastUserAccount();
+    const walletBalance = Number(acct.balance?.totalWalletBalance || 0);
+    const marginBalance = Number(acct.balance?.totalMarginBalance || walletBalance);
+    const availableBalance = Number(acct.balance?.availableBalance || walletBalance);
+    const unrealizedPnl = Number(acct.balance?.totalUnrealizedProfit || 0);
+    const openPositionsCount = acct.positions.length;
+
+    // 2. Filter trade selesai yang terjadi pada tanggal WIB tersebut
+    const dayTrades = this.closedTrades.filter((t) => this.getWibDate(new Date(t.timestamp)) === dateStr);
+    const tradesCountToday = dayTrades.length;
+    let realizedPnlToday = 0;
+    let winCountToday = 0;
+    let lossCountToday = 0;
+
+    for (const t of dayTrades) {
+      realizedPnlToday += Number(t.realizedPnl || 0);
+      if (t.realizedPnl >= 0) {
+        winCountToday++;
+      } else {
+        lossCountToday++;
+      }
+    }
+
+    realizedPnlToday = Math.round(realizedPnlToday * 100) / 100;
+    const winRateToday = tradesCountToday > 0 ? Math.round((winCountToday / tradesCountToday) * 1000) / 10 : 0;
+
+    const snapshot: DailyBalanceSnapshot = {
+      date: dateStr,
+      walletBalance,
+      marginBalance,
+      availableBalance,
+      unrealizedPnl,
+      realizedPnlToday,
+      tradesCountToday,
+      winCountToday,
+      lossCountToday,
+      winRateToday,
+      openPositionsCount,
+      timestamp: Date.now(),
+    };
+
+    await dbService.saveDailySnapshot(snapshot);
+    this.log('SUCCESS', `💾 [SNAPSHOT SALDO] Berhasil menyimpan snapshot harian tanggal ${dateStr} (Saldo: $${walletBalance.toFixed(2)}, PnL Hari Itu: ${realizedPnlToday >= 0 ? '+' : ''}$${realizedPnlToday.toFixed(2)})`);
+
+    // 3. Kirim notifikasi Telegram rekap harian jika diminta (otomatis jam 12 malam)
+    if (sendAlert) {
+      const emojiPnl = snapshot.realizedPnlToday >= 0 ? '🟢' : '🔴';
+      const signPnl = snapshot.realizedPnlToday >= 0 ? '+' : '';
+      const msg =
+        `📊 <b>[REKAP HARIAN SALDO & PERFORMA]</b>\n` +
+        `📅 Tanggal: <b>${snapshot.date}</b> (00:00 WIB)\n\n` +
+        `💰 <b>Informasi Saldo Akun:</b>\n` +
+        `• Total Wallet: <b>$${snapshot.walletBalance.toFixed(2)} USDT</b>\n` +
+        `• Total Margin: <b>$${snapshot.marginBalance.toFixed(2)} USDT</b>\n` +
+        `• Saldo Tersedia: <b>$${snapshot.availableBalance.toFixed(2)} USDT</b>\n` +
+        `• Floating PnL: <b>${snapshot.unrealizedPnl >= 0 ? '+' : ''}$${snapshot.unrealizedPnl.toFixed(2)} USDT</b>\n\n` +
+        `📈 <b>Performa Trading Hari Ini:</b>\n` +
+        `• Realized PnL: <b>${signPnl}$${snapshot.realizedPnlToday.toFixed(2)} USDT</b> ${emojiPnl}\n` +
+        `• Total Selesai: <b>${snapshot.tradesCountToday} trade</b>\n` +
+        `• Hasil: <b>${snapshot.winCountToday} Win / ${snapshot.lossCountToday} Loss</b> (Win Rate: <b>${snapshot.winRateToday.toFixed(1)}%</b>)\n` +
+        `• Posisi Terbuka: <b>${snapshot.openPositionsCount} posisi</b>\n\n` +
+        `💾 <i>Snapshot saldo telah otomatis disimpan ke database untuk pelacakan performa.</i>`;
+      this.sendTelegram(msg);
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * Pengecekan otomatis tengah malam (00:00 WIB) untuk rekap saldo harian
+   */
+  public async checkDailyMidnightSnapshot(): Promise<void> {
+    const times = this.getTimes();
+    const todayWib = this.getWibDate();
+    const yesterdayWib = this.getYesterdayWibDate();
+
+    // Pastikan lastMidnightSnapshotDate terisi dari DB jika masih kosong
+    if (!this.lastMidnightSnapshotDate) {
+      const existing = await dbService.loadDailySnapshots(1);
+      if (existing.length > 0) {
+        this.lastMidnightSnapshotDate = existing[0].date;
+      }
+    }
+
+    // 1. Cek tepat jam 00:00 - 00:05 WIB: Rekap hari kemarin yang baru saja selesai
+    if (times.wibHour === 0 && times.wibMinute <= 5) {
+      if (this.lastMidnightSnapshotDate !== yesterdayWib) {
+        this.lastMidnightSnapshotDate = yesterdayWib;
+        this.log('INFO', `🌙 [REKAP TENGAH MALAM] Mengambil snapshot saldo jam 12 malam untuk tanggal ${yesterdayWib} (00:00 WIB)...`);
+        await this.takeDailyBalanceSnapshot(yesterdayWib, true);
+      }
+    } else {
+      // 2. Graceful catchup: Jika server baru menyala di siang/sore hari dan hari kemarin belum punya snapshot
+      if (this.lastMidnightSnapshotDate !== yesterdayWib && this.lastMidnightSnapshotDate !== todayWib) {
+        const recentSnapshots = await dbService.loadDailySnapshots(5);
+        const hasYesterday = recentSnapshots.some((s) => s.date === yesterdayWib);
+        if (!hasYesterday) {
+          this.log('INFO', `🔄 [CATCH-UP SNAPSHOT] Mendeteksi snapshot tanggal kemarin (${yesterdayWib}) belum tercatat. Mengambil snapshot sekarang...`);
+          this.lastMidnightSnapshotDate = yesterdayWib;
+          await this.takeDailyBalanceSnapshot(yesterdayWib, false);
+        }
+      }
+    }
+  }
+
+  /**
+   * Mengambil daftar riwayat snapshot harian dari database/JSON
+   */
+  public async getDailySnapshots(days: number = 60): Promise<DailyBalanceSnapshot[]> {
+    return await dbService.loadDailySnapshots(days);
   }
 
   getWeekendBreakStatus(overridePositionsCount?: number): WeekendBreakStatus {

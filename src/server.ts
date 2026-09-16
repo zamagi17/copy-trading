@@ -470,6 +470,29 @@ app.get('/api/closed-trades', requireAuth, (req, res) => {
   res.json({ success: true, trades: engine.getClosedTrades() });
 });
 
+app.get('/api/daily-snapshots', requireAuth, async (req, res) => {
+  try {
+    const days = req.query.days ? parseInt(req.query.days as string, 10) : 60;
+    const snapshots = await engine.getDailySnapshots(days);
+    res.json({ success: true, data: snapshots });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/daily-snapshots/take', requireAuth, async (req, res) => {
+  try {
+    const snapshot = await engine.takeDailyBalanceSnapshot(undefined, false);
+    res.json({
+      success: true,
+      message: `Snapshot saldo harian (${snapshot.date}) berhasil disimpan!`,
+      data: snapshot,
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 app.post('/api/clear-closed-trades', requireAuth, (req, res) => {
   engine.clearClosedTrades();
   res.json({ success: true, message: 'Riwayat trade selesai telah dibersihkan.' });

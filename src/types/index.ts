@@ -205,3 +205,19 @@ export interface ClosedTrade {
   closedAt: string;
   isPaper: boolean;
 }
+
+export interface DailyBalanceSnapshot {
+  date: string; // "YYYY-MM-DD"
+  walletBalance: number;
+  marginBalance: number;
+  availableBalance: number;
+  unrealizedPnl: number;
+  realizedPnlToday: number;
+  tradesCountToday: number;
+  winCountToday: number;
+  lossCountToday: number;
+  winRateToday: number;
+  openPositionsCount: number;
+  timestamp: number;
+  createdAt?: string;
+}
