@@ -31,6 +31,11 @@ export class CopyTradeEngine {
   private holidayAbortedReason: string = '';
   private holidayAbortedAt: number = 0;
   private isScheduleSleeping: boolean = false;
+  private isScheduleAborted: boolean = false;
+  private scheduleAbortedReason: string = '';
+  private scheduleAbortedAt: number = 0;
+  private lastUserBalance: BalanceInfo | null = null;
+  private lastUserPositions: UserPosition[] = [];
   public virtualPositions: Map<string, UserPosition> = new Map();
   public streamLeaderPositions: Map<string, LeadPosition> = new Map();
   public positionAvgCounts: Map<string, { leader: number; user: number }> = new Map();
@@ -92,6 +97,18 @@ export class CopyTradeEngine {
           this.holidayAbortedReason = dbVs.holidayAbortedReason || '';
           this.holidayAbortedAt = dbVs.holidayAbortedAt || 0;
         }
+        if (typeof dbVs.isScheduleAborted === 'boolean') {
+          this.isScheduleAborted = dbVs.isScheduleAborted;
+          this.scheduleAbortedReason = dbVs.scheduleAbortedReason || '';
+          this.scheduleAbortedAt = dbVs.scheduleAbortedAt || 0;
+        }
+        if (dbVs.lastLeaderDetail) {
+          this.lastLeaderDetail = dbVs.lastLeaderDetail;
+          this.lastLeaderEquity = this.lastLeaderDetail?.totalEquity || this.lastLeaderEquity;
+        }
+        if (dbVs.lastUserBalance) {
+          this.lastUserBalance = dbVs.lastUserBalance;
+        }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual dari PostgreSQL (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
         }
@@ -107,6 +124,25 @@ export class CopyTradeEngine {
         this.log('INFO', `📜 Memulihkan ${dbTrades.length} riwayat trade dari PostgreSQL.`);
       }
     }
+
+    // Warmup awal: ambil profil leader dan saldo Binance secara aman di latar belakang jika belum ada
+    if (!this.lastLeaderDetail && this.config.portfolioId) {
+      scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy).then((detail) => {
+        if (detail.isSuccess) {
+          this.lastLeaderDetail = detail;
+          this.lastLeaderEquity = detail.totalEquity || this.lastLeaderEquity;
+          this.saveVirtualState();
+        }
+      }).catch(() => {});
+    }
+
+    if (!this.config.paperTrading && binanceClient.isConfigured() && !this.lastUserBalance) {
+      binanceClient.syncTime().then(() => binanceClient.getAccountBalance()).then((bal) => {
+        if (bal && (bal.totalWalletBalance > 0 || bal.availableBalance > 0)) {
+          this.setLastUserAccount(bal, []);
+        }
+      }).catch(() => {});
+    }
   }
 
   private saveVirtualState() {
@@ -121,6 +157,11 @@ export class CopyTradeEngine {
         isHolidayAborted: this.isHolidayAborted,
         holidayAbortedReason: this.holidayAbortedReason,
         holidayAbortedAt: this.holidayAbortedAt,
+        isScheduleAborted: this.isScheduleAborted,
+        scheduleAbortedReason: this.scheduleAbortedReason,
+        scheduleAbortedAt: this.scheduleAbortedAt,
+        lastLeaderDetail: this.lastLeaderDetail,
+        lastUserBalance: this.lastUserBalance,
       };
       fs.writeFileSync(VIRTUAL_STATE_PATH, JSON.stringify(data, null, 2), 'utf-8');
       dbService.saveVirtualState(data).catch(() => {});
@@ -159,6 +200,18 @@ export class CopyTradeEngine {
           this.isHolidayAborted = data.isHolidayAborted;
           this.holidayAbortedReason = data.holidayAbortedReason || '';
           this.holidayAbortedAt = data.holidayAbortedAt || 0;
+        }
+        if (typeof data.isScheduleAborted === 'boolean') {
+          this.isScheduleAborted = data.isScheduleAborted;
+          this.scheduleAbortedReason = data.scheduleAbortedReason || '';
+          this.scheduleAbortedAt = data.scheduleAbortedAt || 0;
+        }
+        if (data.lastLeaderDetail) {
+          this.lastLeaderDetail = data.lastLeaderDetail;
+          this.lastLeaderEquity = this.lastLeaderDetail?.totalEquity || this.lastLeaderEquity;
+        }
+        if (data.lastUserBalance) {
+          this.lastUserBalance = data.lastUserBalance;
         }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual tersimpan dari disk (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
@@ -468,6 +521,41 @@ export class CopyTradeEngine {
     return null;
   }
 
+  getLastUserAccount(): { balance: BalanceInfo | null; positions: UserPosition[] } {
+    if (this.config.paperTrading) {
+      let totalUnrealizedProfit = 0;
+      let usedMargin = 0;
+      for (const vp of this.virtualPositions.values()) {
+        totalUnrealizedProfit += (vp.unRealizedProfit || 0);
+        usedMargin += ((Math.abs(vp.positionAmt) * (vp.entryPrice || 0)) / (vp.leverage || 10));
+      }
+      return {
+        balance: {
+          totalWalletBalance: this.virtualWalletBalance,
+          totalUnrealizedProfit,
+          totalMarginBalance: this.virtualWalletBalance + totalUnrealizedProfit,
+          availableBalance: Math.max(0, this.virtualWalletBalance - usedMargin),
+        },
+        positions: Array.from(this.virtualPositions.values()),
+      };
+    }
+    return {
+      balance: this.lastUserBalance,
+      positions: this.lastUserPositions,
+    };
+  }
+
+  setLastUserAccount(balance: BalanceInfo | null, positions: UserPosition[] = []) {
+    if (balance && (balance.totalWalletBalance > 0 || balance.availableBalance > 0 || balance.totalMarginBalance > 0)) {
+      this.lastUserBalance = balance;
+    }
+    if (Array.isArray(positions)) {
+      this.lastUserPositions = positions;
+      this.lastUserPositionsCount = positions.length;
+    }
+    this.saveVirtualState();
+  }
+
   async fetchLeaderSnapshot(): Promise<LeadPortfolioDetail | null> {
     if (!this.config.portfolioId) return null;
     try {
@@ -655,6 +743,58 @@ export class CopyTradeEngine {
   }
 
   /**
+   * Membatalkan Jadwal Istirahat Harian seketika jika polling mendeteksi transaksi leader.
+   */
+  public abortDailySchedule(reason: string, details?: string) {
+    if (this.isScheduleAborted) return;
+
+    this.isScheduleAborted = true;
+    this.isScheduleSleeping = false;
+    this.scheduleAbortedReason = reason;
+    this.scheduleAbortedAt = Date.now();
+    this.saveVirtualState();
+
+    this.log('WARN', `🚨 [JADWAL ISTIRAHAT DIBATALKAN - BOT BANGUN] Leader bertransaksi: ${reason}! Mode istirahat seketika dihentikan. Bot BANGUN & KEMBALI AKTIF PENUH!`);
+
+    this.sendTelegram(
+      `🚨 <b>[JADWAL ISTIRAHAT DIBATALKAN - BOT BANGUN]</b>\n\n` +
+      `Terdeteksi transaksi baru dari Leader saat bot dalam mode istirahat:\n` +
+      `⚡ <b>${reason}</b>\n` +
+      (details ? `ℹ️ Detail: <code>${details}</code>\n\n` : '\n') +
+      `🟢 <b>TINDAKAN OTOMATIS:</b>\n` +
+      `1. Mode istirahat harian seketika <b>DIBATALKAN</b>.\n` +
+      `2. Polling standby dikembalikan ke <b>kecepatan penuh</b>.\n` +
+      `3. Transaksi Leader langsung <b>disalin / dieksekusi</b> ke akun Anda!`
+    );
+
+    if (this.wsBroadcaster) {
+      this.wsBroadcaster('TICK', {
+        status: this.getStatus(),
+        leader: this.getLastLeaderDetail(),
+        user: this.getLastUserAccount(),
+      });
+    }
+  }
+
+  /**
+   * Reset status pembatalan jadwal istirahat secara manual.
+   */
+  public resetDailyScheduleAbort() {
+    this.isScheduleAborted = false;
+    this.scheduleAbortedReason = '';
+    this.scheduleAbortedAt = 0;
+    this.saveVirtualState();
+    this.log('INFO', '🕒 Status pembatalan jadwal istirahat telah di-reset. Bot dapat tidur kembali sesuai jadwal.');
+    if (this.wsBroadcaster) {
+      this.wsBroadcaster('TICK', {
+        status: this.getStatus(),
+        leader: this.getLastLeaderDetail(),
+        user: this.getLastUserAccount(),
+      });
+    }
+  }
+
+  /**
    * Mengembalikan status Jadwal Istirahat Harian (Sleep Schedule)
    */
   public getDailyScheduleStatus(overridePositionsCount?: number): DailyScheduleStatus {
@@ -668,6 +808,9 @@ export class CopyTradeEngine {
         action: cfg?.action || 'FULL_STOP',
         resumeInText: '',
         guardingPositions: false,
+        isScheduleAborted: this.isScheduleAborted,
+        abortedReason: this.scheduleAbortedReason,
+        abortedAt: this.scheduleAbortedAt,
       };
     }
 
@@ -700,10 +843,18 @@ export class CopyTradeEngine {
       }
     }
 
+    // Jika waktu istirahat sudah lewat secara alami, reset pembatalan untuk hari berikutnya
+    if (!inScheduleWindow && this.isScheduleAborted) {
+      this.isScheduleAborted = false;
+      this.scheduleAbortedReason = '';
+      this.scheduleAbortedAt = 0;
+      this.saveVirtualState();
+    }
+
     const count = overridePositionsCount !== undefined ? overridePositionsCount : this.getUserPositionsCount();
     const hasOpenPositions = count > 0;
     const isGuarding = hasOpenPositions && (cfg.guardOpenPositions !== false);
-    const isSleeping = inScheduleWindow && !isGuarding;
+    const isSleeping = inScheduleWindow && !isGuarding && !this.isScheduleAborted;
 
     const hoursLeft = Math.floor(diffMinsToResume / 60);
     const minsLeft = diffMinsToResume % 60;
@@ -719,6 +870,9 @@ export class CopyTradeEngine {
       action: cfg.action || 'FULL_STOP',
       resumeInText,
       guardingPositions: inScheduleWindow && isGuarding,
+      isScheduleAborted: this.isScheduleAborted,
+      abortedReason: this.scheduleAbortedReason,
+      abortedAt: this.scheduleAbortedAt,
     };
   }
 
@@ -820,8 +974,8 @@ export class CopyTradeEngine {
   getStatus(): EngineStatus {
     const userPositions = this.config.paperTrading
       ? Array.from(this.virtualPositions.values())
-      : [];
-    const count = this.config.paperTrading ? this.virtualPositions.size : this.lastUserPositionsCount;
+      : (this.lastUserPositions || []);
+    const count = this.config.paperTrading ? this.virtualPositions.size : (this.lastUserPositions?.length ?? this.lastUserPositionsCount);
     const weekendBreakStatus = this.getWeekendBreakStatus(count);
 
     return {
@@ -830,7 +984,7 @@ export class CopyTradeEngine {
       lastPollTime: this.pollCount > 0 ? new Date().toLocaleTimeString('id-ID') : null,
       pollCount: this.pollCount,
       leaderEquity: this.lastLeaderEquity,
-      userEquity: this.config.paperTrading ? this.virtualWalletBalance : 0,
+      userEquity: this.config.paperTrading ? this.virtualWalletBalance : (this.lastUserBalance?.totalWalletBalance ?? this.lastUserBalance?.availableBalance ?? 0),
       leaderPositionsCount: this.lastLeaderPositions.size,
       userPositionsCount: userPositions.length,
       activePairs: Array.from(this.lastLeaderPositions.keys()),
@@ -896,8 +1050,15 @@ export class CopyTradeEngine {
 
       // Broadcast update ke UI dashboard agar indikator istirahat segera terlihat
       if (this.wsBroadcaster) {
+        const acct = this.getLastUserAccount();
         this.wsBroadcaster('TICK', {
           status: this.getStatus(),
+          leader: this.getLastLeaderDetail(),
+          user: {
+            balance: acct.balance,
+            positions: acct.positions,
+            closedTrades: this.closedTrades,
+          },
         });
       }
 
@@ -1053,22 +1214,26 @@ export class CopyTradeEngine {
         userBalance = bal.totalWalletBalance > 0 ? bal.totalWalletBalance : bal.availableBalance;
         userBalanceInfo = bal;
         userPositions = await binanceClient.getOpenPositions();
+        this.setLastUserAccount(bal, userPositions);
       } catch (e: any) {
         this.log('WARN', `Gagal ambil saldo/posisi akun pengguna: ${e.message}`);
-        userBalanceInfo = {
+        userBalanceInfo = this.lastUserBalance || {
           totalWalletBalance: 0,
           totalUnrealizedProfit: 0,
           totalMarginBalance: 0,
           availableBalance: 0,
         };
+        userPositions = this.lastUserPositions || [];
+        userBalance = userBalanceInfo.totalWalletBalance > 0 ? userBalanceInfo.totalWalletBalance : userBalanceInfo.availableBalance;
       }
     } else {
-      userBalanceInfo = {
+      userBalanceInfo = this.lastUserBalance || {
         totalWalletBalance: 0,
         totalUnrealizedProfit: 0,
         totalMarginBalance: 0,
         availableBalance: 0,
       };
+      userPositions = this.lastUserPositions || [];
     }
 
     const userPositionsMap = new Map<string, UserPosition>();
@@ -1136,6 +1301,14 @@ export class CopyTradeEngine {
             const firstOrd = newOrders[0];
             const orderDesc = `${firstOrd.action} ${firstOrd.symbol} (${firstOrd.positionSide}) @ $${firstOrd.avgPrice || 0}`;
             this.abortWeekendHoliday(`Order baru: ${orderDesc}`, `${newOrders.length} transaksi baru terdeteksi pada feed stream leader`);
+          }
+
+          // AUTO-ABORT JADWAL ISTIRAHAT HARIAN JIKA ADA TRANSAKSI BARU DARI LEADER
+          const dailyScheduleStatus = this.getDailyScheduleStatus();
+          if (newOrders.length > 0 && this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
+            const firstOrd = newOrders[0];
+            const orderDesc = `${firstOrd.action} ${firstOrd.symbol} (${firstOrd.positionSide}) @ $${firstOrd.avgPrice || 0}`;
+            this.abortDailySchedule(`Order baru: ${orderDesc}`, `${newOrders.length} transaksi baru terdeteksi pada feed stream leader`);
           }
 
           for (const ord of newOrders) {
@@ -1427,6 +1600,10 @@ export class CopyTradeEngine {
             if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
               this.abortWeekendHoliday(`Buka posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `Entry: $${leaderPos.entryPrice}, Vol: ${leaderPos.amount}`);
             }
+            const dailyScheduleStatus = this.getDailyScheduleStatus();
+            if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
+              this.abortDailySchedule(`Buka posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `Entry: $${leaderPos.entryPrice}, Vol: ${leaderPos.amount}`);
+            }
             await this.handleNewPosition(leaderPos, userBalance, userPositionsMap.get(key));
           } else {
             // POSISI SUDAH ADA SEBELUMNYA: Cek apakah leader menambah posisi (Averaging) atau partial close
@@ -1439,12 +1616,20 @@ export class CopyTradeEngine {
               if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
                 this.abortWeekendHoliday(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
               }
+              const dailyScheduleStatus = this.getDailyScheduleStatus();
+              if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
+                this.abortDailySchedule(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
+              }
               await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPositionsMap.get(key));
             } else if (deltaAmount < 0 && Math.abs(deltaPct) >= 0.04) {
               // Leader Partial Close
               this.log('INFO', `📉 LEADER PARTIAL CLOSE: ${leaderPos.symbol} ${leaderPos.positionSide} (-${Math.abs(deltaAmount).toFixed(4)} koin)`);
               if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
                 this.abortWeekendHoliday(`Partial close ${leaderPos.symbol} (${leaderPos.positionSide})`, `-${Math.abs(deltaAmount).toFixed(4)} koin`);
+              }
+              const dailyScheduleStatus = this.getDailyScheduleStatus();
+              if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
+                this.abortDailySchedule(`Partial close ${leaderPos.symbol} (${leaderPos.positionSide})`, `-${Math.abs(deltaAmount).toFixed(4)} koin`);
               }
               await this.handlePartialClose(leaderPos, Math.abs(deltaAmount), prevLeaderPos.amount, userPositionsMap.get(key));
             }
@@ -1457,6 +1642,10 @@ export class CopyTradeEngine {
             this.log('INFO', `🎯 LEADER MENUTUP POSISI: ${prevLeaderPos.symbol} ${prevLeaderPos.positionSide}. Menutup posisi akun pengguna...`);
             if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
               this.abortWeekendHoliday(`Tutup posisi ${prevLeaderPos.symbol} (${prevLeaderPos.positionSide})`, `Leader menutup penuh posisi`);
+            }
+            const dailyScheduleStatus = this.getDailyScheduleStatus();
+            if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
+              this.abortDailySchedule(`Tutup posisi ${prevLeaderPos.symbol} (${prevLeaderPos.positionSide})`, `Leader menutup penuh posisi`);
             }
             const userPos = userPositionsMap.get(key);
             if (userPos && Math.abs(userPos.positionAmt) > 0) {
@@ -1569,6 +1758,11 @@ export class CopyTradeEngine {
       recentClose &&
       (Date.now() - recentClose.closedAt) <= reEntryWindowMs
     );
+
+    const dailyScheduleStatus = this.getDailyScheduleStatus();
+    if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
+      this.abortDailySchedule(`Leader Membuka Posisi: ${leaderPos.symbol} (${leaderPos.positionSide})`, `Auto-abort dipicu di handleNewPosition`);
+    }
 
     if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
       if (this.config.weekendBreak?.autoAbortOnLeaderTrade !== false) {

@@ -915,9 +915,9 @@
               <label for="selectScheduleAction" data-i18n="label_schedule_action">Mode Selama Jam Istirahat:</label>
               <select id="selectScheduleAction">
                 <option value="FULL_STOP" selected>🛑 Berhenti Total (Hemat Kuota 100% / 0 Request)</option>
-                <option value="STANDBY">⏱️ Standby Lambat (Polling 60 Detik)</option>
+                <option value="STANDBY">⏱️ Standby Lambat (Polling 60s + Bangun Otomatis Jika Leader Order)</option>
               </select>
-              <small data-i18n="hint_schedule_action">Pilih "Berhenti Total" untuk konsumsi 0 kuota residential proxy selama jam istirahat.</small>
+              <small data-i18n="hint_schedule_action">Pilih "Standby Lambat" jika ingin bot polling setiap 60 detik dan langsung bangun seketika begitu Leader membuka posisi!</small>
             </div>
           </div>
 
@@ -973,7 +973,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.4"></script>
+  <script src="app.js?v=2.5"></script>
   <script>
     lucide.createIcons();
   </script>

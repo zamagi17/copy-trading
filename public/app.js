@@ -1010,6 +1010,14 @@ function connectWebSocket() {
 }
 
 async function fetchInitialData() {
+  // Pulihkan cache saldo akun dan profil leader dari localStorage seketika agar tidak ada kedipan $0.00
+  try {
+    const cachedBal = localStorage.getItem('copytrader_cached_balance');
+    if (cachedBal) updateUserAccountUI(JSON.parse(cachedBal), []);
+    const cachedLead = localStorage.getItem('copytrader_cached_leader');
+    if (cachedLead) updateLeaderUI(JSON.parse(cachedLead), []);
+  } catch {}
+
   try {
     const res = await apiFetch('/api/config');
     currentConfig = await res.json();
@@ -1127,8 +1135,20 @@ function updateEngineUI(status) {
       scheduleBadge.title = `Mode Istirahat Aktif (${ds.startTime} - ${ds.endTime} WIB). Bangun: ${ds.resumeInText}`;
       if (statusDot) statusDot.className = 'status-dot dot-purple';
       if (statusText) {
-        statusText.innerText = `ISTIRAHAT (${ds.endTime})`;
+        statusText.innerText = 'ISTIRAHAT';
         statusText.style.color = '#c4b5fd';
+      }
+    } else if (ds.enabled && ds.isScheduleAborted && isEngineActive) {
+      scheduleBadge.style.display = 'flex';
+      scheduleBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+      scheduleBadge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+      scheduleBadge.style.color = '#f87171';
+      if (scheduleBadgeText) scheduleBadgeText.innerText = `🚨 BANGUN (LEADER AKTIF)`;
+      scheduleBadge.title = `Istirahat dibatalkan otomatis karena transaksi leader: ${ds.abortedReason || ''}`;
+      if (statusDot) statusDot.className = 'status-dot dot-green';
+      if (statusText) {
+        statusText.innerText = 'RUNNING';
+        statusText.style.color = '#22c55e';
       }
     } else if (ds.enabled && ds.guardingPositions && isEngineActive) {
       scheduleBadge.style.display = 'flex';
@@ -1289,6 +1309,17 @@ function updateConfigSpecs(cfg) {
 }
 
 function updateLeaderUI(l, userPositions = []) {
+  const LEADER_STORAGE_KEY = 'copytrader_cached_leader';
+  if (!l || (!l.totalEquity && !l.nickname)) {
+    try {
+      const saved = localStorage.getItem(LEADER_STORAGE_KEY);
+      if (saved) l = JSON.parse(saved);
+    } catch {}
+  } else {
+    try {
+      localStorage.setItem(LEADER_STORAGE_KEY, JSON.stringify(l));
+    } catch {}
+  }
   if (!l) return;
   if (l.nickname && leaderName) leaderName.innerText = l.nickname;
   if (l.totalEquity && leaderEquityVal) leaderEquityVal.innerText = `${formatNumber(l.totalEquity)}`;
@@ -1337,8 +1368,43 @@ function updateTickData(payload) {
 }
 
 function updateUserAccountUI(balance, positions) {
+  const BALANCE_STORAGE_KEY = 'copytrader_cached_balance';
+
+  // Cek apakah incoming balance bernilai kosong atau nol
+  const isIncomingEmpty = !balance || (
+    typeof balance === 'object' &&
+    Number(balance.totalWalletBalance || 0) === 0 &&
+    Number(balance.totalMarginBalance || 0) === 0 &&
+    Number(balance.availableBalance || 0) === 0
+  );
+
+  if (isIncomingEmpty) {
+    if (lastBalanceData && (Number(lastBalanceData.totalWalletBalance || 0) > 0 || Number(lastBalanceData.availableBalance || 0) > 0)) {
+      balance = lastBalanceData;
+    } else {
+      try {
+        const saved = localStorage.getItem(BALANCE_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && (Number(parsed.totalWalletBalance || 0) > 0 || Number(parsed.availableBalance || 0) > 0)) {
+            balance = parsed;
+          }
+        }
+      } catch {}
+    }
+  } else if (balance && typeof balance === 'object') {
+    if (Number(balance.totalWalletBalance || 0) > 0 || Number(balance.availableBalance || 0) > 0) {
+      lastBalanceData = balance;
+      try {
+        localStorage.setItem(BALANCE_STORAGE_KEY, JSON.stringify(balance));
+      } catch {}
+    }
+  }
+
   lastBalanceData = balance;
-  lastUserPositions = positions;
+  if (Array.isArray(positions)) {
+    lastUserPositions = positions;
+  }
 
   let total = 0;
   let avail = 0;
@@ -2540,6 +2606,11 @@ async function loadScheduleData() {
           scheduleLiveBanner.style.borderColor = 'rgba(100, 116, 139, 0.3)';
           scheduleLiveBanner.style.color = '#94a3b8';
           scheduleLiveText.innerHTML = `<strong>Status:</strong> Jadwal Istirahat saat ini <strong>NONAKTIF</strong>. Bot beroperasi normal 24 jam.`;
+        } else if (st.isScheduleAborted) {
+          scheduleLiveBanner.style.background = 'rgba(239, 68, 68, 0.15)';
+          scheduleLiveBanner.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          scheduleLiveBanner.style.color = '#f87171';
+          scheduleLiveText.innerHTML = `🚨 <strong>ISTIRAHAT DIBATALKAN (LEADER AKTIF):</strong> Terdeteksi transaksi (${st.abortedReason || 'Order baru'}). Bot telah otomatis bangun & aktif menyalin order. <button type="button" onclick="resetScheduleAbortManual()" style="margin-left:8px; padding:3px 10px; font-size:0.75rem; border-radius:6px; background:#ef4444; color:white; border:none; cursor:pointer; font-weight:700;">Tidur Kembali</button>`;
         } else if (st.isSleeping) {
           scheduleLiveBanner.style.background = 'rgba(139, 92, 246, 0.2)';
           scheduleLiveBanner.style.borderColor = 'rgba(139, 92, 246, 0.5)';
@@ -2649,5 +2720,24 @@ async function resetWeekendHolidayAbort() {
     }
   } catch (err) {
     alert('❌ Error koneksi: ' + err.message);
+  }
+}
+
+async function resetScheduleAbortManual() {
+  try {
+    const res = await apiFetch('/api/schedule/reset-abort', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      appendLog('SUCCESS', '🕒 Status pembatalan jadwal istirahat berhasil di-reset.');
+      await loadScheduleData();
+      if (data.status) {
+        currentStatus = data.status;
+        updateEngineUI(data.status);
+      }
+    } else {
+      alert('❌ Gagal reset: ' + data.message);
+    }
+  } catch (err) {
+    alert('❌ Error: ' + err.message);
   }
 }

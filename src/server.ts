@@ -70,12 +70,14 @@ wss.on('connection', (ws, req) => {
     };
     initUserPositions = engine.getVirtualPositions();
   } else {
-    initUserBalance = {
+    const cached = engine.getLastUserAccount();
+    initUserBalance = cached.balance || {
       totalWalletBalance: 0,
       totalUnrealizedProfit: 0,
       totalMarginBalance: 0,
       availableBalance: 0,
     };
+    initUserPositions = cached.positions || [];
   }
 
   // Kirim data awal saat connect
@@ -263,8 +265,18 @@ app.get('/api/status', requireAuth, async (req, res) => {
       try {
         userBalance = await binanceClient.getAccountBalance();
         userPositions = await binanceClient.getOpenPositions();
+        if (userBalance && (userBalance.totalWalletBalance > 0 || userBalance.availableBalance > 0)) {
+          engine.setLastUserAccount(userBalance, userPositions);
+        }
       } catch (e: any) {
-        // Handle silently
+        const cached = engine.getLastUserAccount();
+        userBalance = cached.balance;
+        userPositions = cached.positions;
+      }
+      if (!userBalance) {
+        const cached = engine.getLastUserAccount();
+        userBalance = cached.balance;
+        userPositions = cached.positions;
       }
     }
 
@@ -388,13 +400,14 @@ app.get('/api/schedule', requireAuth, (req, res) => {
 
 app.post('/api/schedule', requireAuth, (req, res) => {
   try {
-    const { enabled, startTime, endTime, action, guardOpenPositions } = req.body;
+    const { enabled, startTime, endTime, action, guardOpenPositions, autoAbortOnLeaderTrade } = req.body;
     const currentCfg = engine.getConfig().dailySchedule || {
       enabled: false,
       startTime: '10:00',
       endTime: '18:30',
       action: 'FULL_STOP',
       guardOpenPositions: true,
+      autoAbortOnLeaderTrade: true,
     };
     const newSchedule = {
       enabled: typeof enabled === 'boolean' ? enabled : currentCfg.enabled,
@@ -402,6 +415,7 @@ app.post('/api/schedule', requireAuth, (req, res) => {
       endTime: endTime ? String(endTime).trim() : currentCfg.endTime,
       action: (action === 'STANDBY' ? 'STANDBY' : 'FULL_STOP') as 'STANDBY' | 'FULL_STOP',
       guardOpenPositions: guardOpenPositions !== false,
+      autoAbortOnLeaderTrade: typeof autoAbortOnLeaderTrade === 'boolean' ? autoAbortOnLeaderTrade : (currentCfg.autoAbortOnLeaderTrade !== false),
     };
 
     engine.saveConfig({ dailySchedule: newSchedule });
@@ -410,6 +424,19 @@ app.post('/api/schedule', requireAuth, (req, res) => {
       message: 'Jadwal istirahat harian berhasil disimpan.',
       schedule: newSchedule,
       status: engine.getDailyScheduleStatus(),
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/schedule/reset-abort', requireAuth, (req, res) => {
+  try {
+    engine.resetDailyScheduleAbort();
+    res.json({
+      success: true,
+      message: 'Status pembatalan jadwal istirahat berhasil di-reset.',
+      status: engine.getStatus(),
     });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });

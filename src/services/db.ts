@@ -81,6 +81,11 @@ export class DatabaseService {
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS is_holiday_aborted BOOLEAN DEFAULT FALSE;
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS holiday_aborted_reason TEXT DEFAULT '';
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS holiday_aborted_at BIGINT DEFAULT 0;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS is_schedule_aborted BOOLEAN DEFAULT FALSE;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS schedule_aborted_reason TEXT DEFAULT '';
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS schedule_aborted_at BIGINT DEFAULT 0;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS last_leader_detail JSONB DEFAULT NULL;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS last_user_balance JSONB DEFAULT NULL;
         `);
 
         // 3. Tabel Riwayat Transaksi Selesai
@@ -333,6 +338,11 @@ export class DatabaseService {
             isHolidayAborted: Boolean(row.is_holiday_aborted),
             holidayAbortedReason: row.holiday_aborted_reason || '',
             holidayAbortedAt: Number(row.holiday_aborted_at || 0),
+            isScheduleAborted: Boolean(row.is_schedule_aborted),
+            scheduleAbortedReason: row.schedule_aborted_reason || '',
+            scheduleAbortedAt: Number(row.schedule_aborted_at || 0),
+            lastLeaderDetail: row.last_leader_detail || null,
+            lastUserBalance: row.last_user_balance || null,
           };
         }
       } catch (e: any) {
@@ -352,12 +362,17 @@ export class DatabaseService {
     isHolidayAborted?: boolean;
     holidayAbortedReason?: string;
     holidayAbortedAt?: number;
+    isScheduleAborted?: boolean;
+    scheduleAbortedReason?: string;
+    scheduleAbortedAt?: number;
+    lastLeaderDetail?: any;
+    lastUserBalance?: any;
   }): Promise<void> {
     if (this.isConnected && this.pool) {
       try {
         await this.pool.query(
-          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, is_holiday_aborted, holiday_aborted_reason, holiday_aborted_at, updated_at)
-           VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, is_holiday_aborted, holiday_aborted_reason, holiday_aborted_at, is_schedule_aborted, schedule_aborted_reason, schedule_aborted_at, last_leader_detail, last_user_balance, updated_at)
+           VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
            ON CONFLICT (id) DO UPDATE SET
              virtual_wallet_balance = $1,
              virtual_positions = $2,
@@ -368,6 +383,11 @@ export class DatabaseService {
              is_holiday_aborted = $7,
              holiday_aborted_reason = $8,
              holiday_aborted_at = $9,
+             is_schedule_aborted = $10,
+             schedule_aborted_reason = $11,
+             schedule_aborted_at = $12,
+             last_leader_detail = COALESCE($13, virtual_state.last_leader_detail),
+             last_user_balance = COALESCE($14, virtual_state.last_user_balance),
              updated_at = CURRENT_TIMESTAMP;`,
           [
             data.virtualWalletBalance,
@@ -379,6 +399,11 @@ export class DatabaseService {
             Boolean(data.isHolidayAborted),
             data.holidayAbortedReason || '',
             Number(data.holidayAbortedAt || 0),
+            Boolean(data.isScheduleAborted),
+            data.scheduleAbortedReason || '',
+            Number(data.scheduleAbortedAt || 0),
+            data.lastLeaderDetail ? JSON.stringify(data.lastLeaderDetail) : null,
+            data.lastUserBalance ? JSON.stringify(data.lastUserBalance) : null,
           ]
         );
       } catch (e: any) {

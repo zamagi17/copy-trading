@@ -60,6 +60,7 @@ export interface DailyScheduleConfig {
   endTime: string;           // Jam bangun/aktif kembali, format "HH:mm" (WIB), default "18:30"
   action: 'FULL_STOP' | 'STANDBY'; // FULL_STOP = 100% pause (0 kuota proxy), STANDBY = polling lambat 60s
   guardOpenPositions: boolean; // Tetap kawal jika ada posisi terbuka hingga 0 (default true)
+  autoAbortOnLeaderTrade?: boolean; // Otomatis batalkan istirahat jika polling 60s mendeteksi transaksi leader (default true)
 }
 
 export interface DailyScheduleStatus {
@@ -70,6 +71,9 @@ export interface DailyScheduleStatus {
   action: 'FULL_STOP' | 'STANDBY';
   resumeInText: string;
   guardingPositions: boolean;
+  isScheduleAborted?: boolean;
+  abortedReason?: string;
+  abortedAt?: number;
 }
 
 export interface AppConfig {

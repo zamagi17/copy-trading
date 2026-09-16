@@ -15,6 +15,10 @@ export class BinanceFuturesClient {
   private baseUrl: string = 'https://fapi.binance.com';
   private filterCache: Map<string, SymbolFilterInfo> = new Map();
   private lastExchangeInfoFetch: number = 0;
+  private timeOffset: number = 0;
+  private lastTimeSync: number = 0;
+  private lastValidBalance: BalanceInfo | null = null;
+  private lastValidPositions: UserPosition[] = [];
 
   configure(apiKey: string, secretKey: string, isTestnet: boolean = false) {
     this.apiKey = (apiKey || '').trim();
@@ -22,14 +26,50 @@ export class BinanceFuturesClient {
     this.baseUrl = isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
     this.isDualSidePosition = null;
     this.lastDualSideFetch = 0;
+    this.lastTimeSync = 0;
   }
 
   isConfigured(): boolean {
     return Boolean(this.apiKey && this.secretKey);
   }
 
+  /**
+   * Sinkronisasi waktu lokal dengan Binance Server Time (/fapi/v1/time)
+   * Mencegah error -1021 (Timestamp for this request was 1000ms ahead / outside recvWindow)
+   */
+  async syncTime(): Promise<number> {
+    try {
+      const client = axios.create({ baseURL: this.baseUrl, timeout: 5000 });
+      const res = await client.get('/fapi/v1/time');
+      if (res.data?.serverTime) {
+        this.timeOffset = Number(res.data.serverTime) - Date.now();
+        this.lastTimeSync = Date.now();
+      }
+    } catch {}
+    return this.timeOffset;
+  }
+
+  private getTimestamp(): number {
+    return Date.now() + this.timeOffset;
+  }
+
   private sign(queryString: string): string {
     return crypto.createHmac('sha256', this.secretKey).update(queryString).digest('hex');
+  }
+
+  private buildSignedQuery(params: Record<string, any> = {}): { query: string; signature: string } {
+    const timestamp = this.getTimestamp();
+    const parts: string[] = [];
+    for (const [key, val] of Object.entries(params)) {
+      if (val !== undefined && val !== null && val !== '') {
+        parts.push(`${key}=${encodeURIComponent(val)}`);
+      }
+    }
+    parts.push('recvWindow=60000');
+    parts.push(`timestamp=${timestamp}`);
+    const query = parts.join('&');
+    const signature = this.sign(query);
+    return { query, signature };
   }
 
   private createClient(): AxiosInstance {
@@ -44,27 +84,51 @@ export class BinanceFuturesClient {
   }
 
   /**
-   * Mengambil saldo akun USDT Binance Futures
+   * Mengambil saldo akun USDT Binance Futures dengan auto-sync waktu dan caching aman
    */
   async getAccountBalance(): Promise<BalanceInfo> {
     if (!this.isConfigured()) {
       return { totalWalletBalance: 0, totalUnrealizedProfit: 0, totalMarginBalance: 0, availableBalance: 0 };
     }
 
-    const timestamp = Date.now();
-    const query = `timestamp=${timestamp}`;
-    const signature = this.sign(query);
+    if (Date.now() - this.lastTimeSync > 900000) {
+      await this.syncTime();
+    }
 
-    const client = this.createClient();
-    const res = await client.get(`/fapi/v2/account?${query}&signature=${signature}`);
-    const data = res.data;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const { query, signature } = this.buildSignedQuery();
+        const client = this.createClient();
+        const res = await client.get(`/fapi/v2/account?${query}&signature=${signature}`);
+        const data = res.data;
 
-    return {
-      totalWalletBalance: Number(data.totalWalletBalance ?? 0),
-      totalUnrealizedProfit: Number(data.totalUnrealizedProfit ?? 0),
-      totalMarginBalance: Number(data.totalMarginBalance ?? 0),
-      availableBalance: Number(data.availableBalance ?? 0),
-    };
+        const info: BalanceInfo = {
+          totalWalletBalance: Number(data.totalWalletBalance ?? 0),
+          totalUnrealizedProfit: Number(data.totalUnrealizedProfit ?? 0),
+          totalMarginBalance: Number(data.totalMarginBalance ?? 0),
+          availableBalance: Number(data.availableBalance ?? 0),
+        };
+
+        if (info.totalWalletBalance > 0 || info.availableBalance > 0 || info.totalMarginBalance > 0) {
+          this.lastValidBalance = info;
+        }
+
+        return info;
+      } catch (err: any) {
+        if (err.response?.data?.code === -1021 && attempt === 1) {
+          await this.syncTime();
+          continue;
+        }
+        if (attempt === 2) {
+          if (this.lastValidBalance) {
+            return this.lastValidBalance;
+          }
+          throw err;
+        }
+      }
+    }
+
+    return this.lastValidBalance || { totalWalletBalance: 0, totalUnrealizedProfit: 0, totalMarginBalance: 0, availableBalance: 0 };
   }
 
   /**
@@ -73,46 +137,64 @@ export class BinanceFuturesClient {
   async getOpenPositions(): Promise<UserPosition[]> {
     if (!this.isConfigured()) return [];
 
-    const timestamp = Date.now();
-    const query = `timestamp=${timestamp}`;
-    const signature = this.sign(query);
+    if (Date.now() - this.lastTimeSync > 900000) {
+      await this.syncTime();
+    }
 
-    const client = this.createClient();
-    const res = await client.get(`/fapi/v2/positionRisk?${query}&signature=${signature}`);
-    const list = res.data;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const { query, signature } = this.buildSignedQuery();
+        const client = this.createClient();
+        const res = await client.get(`/fapi/v2/positionRisk?${query}&signature=${signature}`);
+        const list = res.data;
 
-    if (!Array.isArray(list)) return [];
+        if (!Array.isArray(list)) return this.lastValidPositions;
 
-    return list
-      .filter((p: any) => Math.abs(Number(p.positionAmt || 0)) > 0)
-      .map((p: any) => {
-        const amt = Number(p.positionAmt || 0);
-        let side: 'LONG' | 'SHORT' | 'BOTH' = 'BOTH';
-        if (p.positionSide && p.positionSide !== 'BOTH') {
-          side = p.positionSide;
-        } else {
-          side = amt > 0 ? 'LONG' : 'SHORT';
+        const positions = list
+          .filter((p: any) => Math.abs(Number(p.positionAmt || 0)) > 0)
+          .map((p: any) => {
+            const amt = Number(p.positionAmt || 0);
+            let side: 'LONG' | 'SHORT' | 'BOTH' = 'BOTH';
+            if (p.positionSide && p.positionSide !== 'BOTH') {
+              side = p.positionSide;
+            } else {
+              side = amt > 0 ? 'LONG' : 'SHORT';
+            }
+
+            const entryPrice = Number(p.entryPrice || 0);
+            const leverage = Math.max(1, Number(p.leverage || 1));
+            const notional = Math.abs(Number(p.notional || 0));
+            const computedMargin = (Math.abs(amt) * entryPrice) / leverage;
+            const margin = Number(p.initialMargin || p.isolatedMargin || computedMargin || 0);
+
+            return {
+              symbol: p.symbol,
+              positionSide: side,
+              positionAmt: amt,
+              entryPrice,
+              markPrice: Number(p.markPrice || 0),
+              unRealizedProfit: Number(p.unRealizedProfit || 0),
+              leverage,
+              marginType: p.marginType || 'cross',
+              notional,
+              margin,
+            };
+          });
+
+        this.lastValidPositions = positions;
+        return positions;
+      } catch (err: any) {
+        if (err.response?.data?.code === -1021 && attempt === 1) {
+          await this.syncTime();
+          continue;
         }
+        if (attempt === 2) {
+          return this.lastValidPositions;
+        }
+      }
+    }
 
-        const entryPrice = Number(p.entryPrice || 0);
-        const leverage = Math.max(1, Number(p.leverage || 1));
-        const notional = Math.abs(Number(p.notional || 0));
-        const computedMargin = (Math.abs(amt) * entryPrice) / leverage;
-        const margin = Number(p.initialMargin || p.isolatedMargin || computedMargin || 0);
-
-        return {
-          symbol: p.symbol,
-          positionSide: side,
-          positionAmt: amt,
-          entryPrice,
-          markPrice: Number(p.markPrice || 0),
-          unRealizedProfit: Number(p.unRealizedProfit || 0),
-          leverage,
-          marginType: p.marginType || 'cross',
-          notional,
-          margin,
-        };
-      });
+    return this.lastValidPositions;
   }
 
   /**
@@ -172,14 +254,22 @@ export class BinanceFuturesClient {
    */
   async setLeverage(symbol: string, leverage: number): Promise<void> {
     if (!this.isConfigured()) return;
-    try {
-      const timestamp = Date.now();
-      const query = `symbol=${symbol.toUpperCase()}&leverage=${leverage}&timestamp=${timestamp}`;
-      const signature = this.sign(query);
-      const client = this.createClient();
-      await client.post(`/fapi/v1/leverage?${query}&signature=${signature}`);
-    } catch (err: any) {
-      // Abaikan error jika leverage sudah sama
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const { query, signature } = this.buildSignedQuery({
+          symbol: symbol.toUpperCase(),
+          leverage,
+        });
+        const client = this.createClient();
+        await client.post(`/fapi/v1/leverage?${query}&signature=${signature}`);
+        break;
+      } catch (err: any) {
+        if (err.response?.data?.code === -1021 && attempt === 1) {
+          await this.syncTime();
+          continue;
+        }
+        break;
+      }
     }
   }
 
@@ -188,14 +278,22 @@ export class BinanceFuturesClient {
    */
   async setMarginType(symbol: string, marginType: 'CROSSED' | 'ISOLATED'): Promise<void> {
     if (!this.isConfigured()) return;
-    try {
-      const timestamp = Date.now();
-      const query = `symbol=${symbol.toUpperCase()}&marginType=${marginType}&timestamp=${timestamp}`;
-      const signature = this.sign(query);
-      const client = this.createClient();
-      await client.post(`/fapi/v1/marginType?${query}&signature=${signature}`);
-    } catch {
-      // Abaikan jika tipe margin sudah sama (biasanya error -4046 No need to change)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const { query, signature } = this.buildSignedQuery({
+          symbol: symbol.toUpperCase(),
+          marginType,
+        });
+        const client = this.createClient();
+        await client.post(`/fapi/v1/marginType?${query}&signature=${signature}`);
+        break;
+      } catch (err: any) {
+        if (err.response?.data?.code === -1021 && attempt === 1) {
+          await this.syncTime();
+          continue;
+        }
+        break;
+      }
     }
   }
 
@@ -210,18 +308,23 @@ export class BinanceFuturesClient {
       return this.isDualSidePosition;
     }
     if (!this.isConfigured()) return false;
-    try {
-      const timestamp = Date.now();
-      const query = `timestamp=${timestamp}`;
-      const signature = this.sign(query);
-      const client = this.createClient();
-      const res = await client.get(`/fapi/v1/positionSide/dual?${query}&signature=${signature}`);
-      this.isDualSidePosition = Boolean(res.data?.dualSidePosition);
-      this.lastDualSideFetch = Date.now();
-      return this.isDualSidePosition;
-    } catch {
-      return false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const { query, signature } = this.buildSignedQuery();
+        const client = this.createClient();
+        const res = await client.get(`/fapi/v1/positionSide/dual?${query}&signature=${signature}`);
+        this.isDualSidePosition = Boolean(res.data?.dualSidePosition);
+        this.lastDualSideFetch = Date.now();
+        return this.isDualSidePosition;
+      } catch (err: any) {
+        if (err.response?.data?.code === -1021 && attempt === 1) {
+          await this.syncTime();
+          continue;
+        }
+        return false;
+      }
     }
+    return false;
   }
 
   /**
@@ -239,24 +342,33 @@ export class BinanceFuturesClient {
     }
 
     const isDual = await this.getDualSidePosition();
-    const timestamp = Date.now();
-    let query = `symbol=${symbol.toUpperCase()}&side=${side}&type=MARKET&quantity=${quantity}&timestamp=${timestamp}`;
+    const params: Record<string, any> = {
+      symbol: symbol.toUpperCase(),
+      side,
+      type: 'MARKET',
+      quantity,
+    };
 
     if (isDual) {
-      // Hedge Mode: positionSide wajib dispesifikasikan (LONG/SHORT), reduceOnly tidak dipakai
-      const pSide = positionSide && positionSide !== 'BOTH' ? positionSide : (side === 'BUY' ? 'LONG' : 'SHORT');
-      query += `&positionSide=${pSide}`;
-    } else {
-      // One-Way Mode (persis seperti bot trading-ai): gunakan reduceOnly saat menutup posisi
-      if (reduceOnly) {
-        query += `&reduceOnly=true`;
-      }
+      params.positionSide = positionSide && positionSide !== 'BOTH' ? positionSide : (side === 'BUY' ? 'LONG' : 'SHORT');
+    } else if (reduceOnly) {
+      params.reduceOnly = 'true';
     }
 
-    const signature = this.sign(query);
-    const client = this.createClient();
-    const res = await client.post(`/fapi/v1/order?${query}&signature=${signature}`);
-    return res.data;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const { query, signature } = this.buildSignedQuery(params);
+        const client = this.createClient();
+        const res = await client.post(`/fapi/v1/order?${query}&signature=${signature}`);
+        return res.data;
+      } catch (err: any) {
+        if (err.response?.data?.code === -1021 && attempt === 1) {
+          await this.syncTime();
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   /**
