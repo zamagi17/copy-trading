@@ -245,7 +245,10 @@ export class CopyTradeScraper {
         const executedQty = Number(item.executedQty ?? item.qty ?? 0);
         const avgPrice = Number(item.avgPrice ?? item.price ?? 0);
         const totalPnl = Number(item.totalPnl ?? item.realizedPnl ?? 0);
-        const orderTime = Number(item.orderTime ?? item.orderUpdateTime ?? Date.now());
+        // BEST PRACTICE: Prioritaskan orderUpdateTime (waktu order match / fill di bursa)
+        // sebagai patokan utama eksekusi copy trade agar limit order yang baru match tidak terlewat.
+        const orderTime = Number(item.orderUpdateTime ?? item.orderTime ?? Date.now());
+        const orderCreationTime = Number(item.orderTime ?? item.orderUpdateTime ?? Date.now());
 
         // Tentukan apakah order ini OPEN atau CLOSE serta normalisasikan positionSide ke LONG / SHORT
         let positionSide: 'LONG' | 'SHORT' = 'LONG';
@@ -270,6 +273,9 @@ export class CopyTradeScraper {
           }
         }
 
+        // Signature unik untuk mencegah dobel eksekusi dan menjamin idempotensi
+        const orderKey = `${symbol}_${side}_${positionSide}_${action}_${executedQty}_${avgPrice}_${orderCreationTime}_${orderTime}`;
+
         orders.push({
           symbol,
           side,
@@ -279,6 +285,8 @@ export class CopyTradeScraper {
           avgPrice,
           totalPnl,
           orderTime,
+          orderCreationTime,
+          orderKey,
         });
       }
 

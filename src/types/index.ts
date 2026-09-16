@@ -96,7 +96,9 @@ export interface LeadOrderRecord {
   executedQty: number;
   avgPrice: number;
   totalPnl: number;
-  orderTime: number;
+  orderTime: number; // Waktu eksekusi / match (orderUpdateTime)
+  orderCreationTime?: number; // Waktu order dipasang (orderTime)
+  orderKey?: string; // Signature unik untuk deduplikasi order
 }
 
 export interface LeadPortfolioDetail {

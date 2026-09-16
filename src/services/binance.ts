@@ -261,10 +261,28 @@ export class BinanceFuturesClient {
 
   /**
    * Menutup posisi terbuka secara darurat atau sinkronisasi dengan Leader
+   * Dilengkapi auto-retry hingga 3x dengan jeda bertahap jika terjadi kedipan jaringan
    */
-  async closePosition(symbol: string, currentSide: 'LONG' | 'SHORT', quantity: number): Promise<any> {
+  async closePosition(symbol: string, currentSide: 'LONG' | 'SHORT', quantity: number, maxRetries: number = 3): Promise<any> {
     const side = currentSide === 'LONG' ? 'SELL' : 'BUY';
-    return this.placeMarketOrder(symbol, side, quantity, true, currentSide);
+    let lastErr: any = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.placeMarketOrder(symbol, side, quantity, true, currentSide);
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err.response?.data?.msg || err.message || '');
+        // Jika bursa menyatakan posisi sudah 0 atau reduce-only terpenuhi, anggap sukses tertutup
+        if (msg.includes('ReduceOnly') || msg.includes('position is zero') || msg.includes('Position does not exist')) {
+          return { status: 'ALREADY_CLOSED', msg };
+        }
+        if (attempt < maxRetries) {
+          await new Promise((res) => setTimeout(res, 500 * attempt));
+        }
+      }
+    }
+    throw lastErr;
   }
 
   /**

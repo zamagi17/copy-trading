@@ -23,6 +23,7 @@ export class CopyTradeEngine {
   private lastError: string | null = null;
   private consecutiveProxyErrors: number = 0;
   private lastProcessedOrderTime: number = 0;
+  private processedOrderKeys: Set<string> = new Set();
   private lastSessionKey: string = '';
   private lastUserPositionsCount: number = 0;
   private isHolidayActive: boolean = false;
@@ -79,6 +80,9 @@ export class CopyTradeEngine {
         if (typeof dbVs.lastProcessedOrderTime === 'number' && dbVs.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = dbVs.lastProcessedOrderTime;
         }
+        if (Array.isArray(dbVs.processedOrderKeys)) {
+          this.processedOrderKeys = new Set(dbVs.processedOrderKeys);
+        }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual dari PostgreSQL (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
         }
@@ -104,6 +108,7 @@ export class CopyTradeEngine {
         streamLeaderPositions: Array.from(this.streamLeaderPositions.entries()),
         positionAvgCounts: Array.from(this.positionAvgCounts.entries()),
         lastProcessedOrderTime: this.lastProcessedOrderTime,
+        processedOrderKeys: Array.from(this.processedOrderKeys).slice(-500),
       };
       fs.writeFileSync(VIRTUAL_STATE_PATH, JSON.stringify(data, null, 2), 'utf-8');
       dbService.saveVirtualState(data).catch(() => {});
@@ -134,6 +139,9 @@ export class CopyTradeEngine {
         }
         if (typeof data.lastProcessedOrderTime === 'number' && data.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = data.lastProcessedOrderTime;
+        }
+        if (Array.isArray(data.processedOrderKeys)) {
+          this.processedOrderKeys = new Set(data.processedOrderKeys);
         }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual tersimpan dari disk (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
@@ -308,6 +316,7 @@ export class CopyTradeEngine {
       this.lastLeaderPositions.clear();
       this.lastLeaderEquity = 0;
       this.lastProcessedOrderTime = 0;
+      this.processedOrderKeys.clear();
       this.isFirstTick = true;
       this.log('INFO', `🔄 Target Leader diperbarui ke ID: ${this.config.portfolioId}. Tracking posisi di-reset.`);
     }
@@ -387,6 +396,7 @@ export class CopyTradeEngine {
     this.virtualWalletBalance = this.config.virtualBalanceUsdt ?? 100;
     this.logs = [];
     this.lastProcessedOrderTime = 0;
+    this.processedOrderKeys.clear();
     try {
       if (fs.existsSync(VIRTUAL_STATE_PATH)) {
         fs.unlinkSync(VIRTUAL_STATE_PATH);
@@ -670,19 +680,32 @@ export class CopyTradeEngine {
     };
   }
 
-  start() {
+  start(isAutoResume: boolean = false) {
     if (this.isRunning) return;
     this.isRunning = true;
-    this.isFirstTick = true;
-    this.lastProcessedOrderTime = 0;
     this.config.copyTradeActive = true;
     this.saveConfig({ copyTradeActive: true });
+
+    if (!isAutoResume) {
+      this.isFirstTick = true;
+      this.lastProcessedOrderTime = 0;
+      this.processedOrderKeys.clear();
+    } else {
+      // Auto-resume pasca restart server: pertahankan baseline & processedOrderKeys yang dipulihkan dari DB
+      this.isFirstTick = this.lastProcessedOrderTime === 0;
+    }
+
     const modeTag = this.config.paperTrading ? '🧪 [MODE SIMULASI / PAPER TRADE]' : '🟢 [LIVE TRADING]';
     const pollInfo = this.getCurrentPollingInfo();
     const pollDesc = pollInfo.isAdaptive
       ? `⚡ Polling Adaptif Cerdas WIB: Sesi ${pollInfo.sessionName} @ ${(pollInfo.currentIntervalMs / 1000).toFixed(1)}s (${pollInfo.wibTimeStr})`
       : `⏱️ Polling Manual Tetap: ${(pollInfo.currentIntervalMs / 1000).toFixed(1)}s`;
-    this.log('SUCCESS', `🚀 Copy Trade Engine DIAKTIFKAN (${modeTag}) | ${pollDesc} untuk Leader: ${this.config.portfolioId}`);
+
+    if (isAutoResume) {
+      this.log('SUCCESS', `🔄 [AUTO-RESUME] Server restart terdeteksi dengan status AKTIF! Engine otomatis melanjutkan copy trade (${modeTag}) | ${pollDesc} untuk Leader: ${this.config.portfolioId}`);
+    } else {
+      this.log('SUCCESS', `🚀 Copy Trade Engine DIAKTIFKAN (${modeTag}) | ${pollDesc} untuk Leader: ${this.config.portfolioId}`);
+    }
     this.runLoop();
   }
 
@@ -882,17 +905,35 @@ export class CopyTradeEngine {
       // =========================================================================
       const orders = leaderDetail.orders || [];
       if (orders.length > 0) {
-        if (this.lastProcessedOrderTime === 0) {
-          // Cold Start baseline: catat order terakhir sebagai titik nol
-          this.lastProcessedOrderTime = orders[0].orderTime;
-          this.log('INFO', `🔒 Mode Private Positions Aktif pada Leader. Baseline Latest Records diset pada timestamp: ${new Date(this.lastProcessedOrderTime).toLocaleTimeString('id-ID')}. Bot siap mengeksekusi order baru begitu Leader bertransaksi!`);
+        if (this.lastProcessedOrderTime === 0 || this.processedOrderKeys.size === 0) {
+          // Cold Start baseline: tandai seluruh order saat ini sebagai baseline agar tidak tereksekusi dobel
+          for (const ord of orders) {
+            if (ord.orderKey) this.processedOrderKeys.add(ord.orderKey);
+          }
+          const maxOrderTime = Math.max(...orders.map((o) => o.orderTime));
+          this.lastProcessedOrderTime = Math.max(maxOrderTime, Date.now() - 30000);
+          this.saveVirtualState();
+          this.log('INFO', `🔒 Mode Private Positions Aktif pada Leader. Baseline Latest Records diset pada timestamp: ${new Date(this.lastProcessedOrderTime).toLocaleTimeString('id-ID')} (${this.processedOrderKeys.size} order awal dicatat). Bot siap mengeksekusi order baru begitu Leader bertransaksi!`);
         } else {
-          // Filter order yang benar-benar baru terjadi setelah baseline
+          // Filter order yang benar-benar baru:
+          // 1. Signature unik belum pernah dieksekusi (!this.processedOrderKeys.has(ord.orderKey))
+          // 2. Waktu eksekusi order (orderTime / orderUpdateTime) >= baseline (dengan toleransi skew 5 detik)
           const newOrders = orders
-            .filter((o) => o.orderTime > this.lastProcessedOrderTime)
+            .filter((o) => {
+              const notProcessed = o.orderKey ? !this.processedOrderKeys.has(o.orderKey) : true;
+              const isRecent = o.orderTime >= (this.lastProcessedOrderTime - 5000);
+              return notProcessed && isRecent;
+            })
             .sort((a, b) => a.orderTime - b.orderTime); // urutkan kronologis dari lama ke baru
 
           for (const ord of newOrders) {
+            if (ord.orderKey) {
+              this.processedOrderKeys.add(ord.orderKey);
+              if (this.processedOrderKeys.size > 1000) {
+                const oldestKey = this.processedOrderKeys.values().next().value;
+                if (oldestKey) this.processedOrderKeys.delete(oldestKey);
+              }
+            }
             this.lastProcessedOrderTime = Math.max(this.lastProcessedOrderTime, ord.orderTime);
 
             if (ord.action === 'OPEN') {
@@ -960,14 +1001,34 @@ export class CopyTradeEngine {
                 let targetCloseQty = ord.executedQty > 0 ? (ord.executedQty * equityRatio) : userCurrentQty;
                 targetCloseQty = binanceClient.roundQuantity(targetCloseQty, filter.stepSize);
 
-                // Jika target tutup di bawah minimal lot koin, lewati agar tidak melikuidasi seluruh posisi akun
-                if (targetCloseQty < filter.minQty) {
-                  this.log('INFO', `🎯 [Latest Records] Partial close ${ord.symbol} ${ord.positionSide} dilewati karena kuantitas (${targetCloseQty}) di bawah batas minimum Binance (${filter.minQty}).`);
+                // Cek rasio penutupan koin oleh Leader di stream
+                const existingStream = this.streamLeaderPositions.get(key);
+                const leaderTotalQty = existingStream?.amount || ord.executedQty;
+                const leaderCloseRatio = leaderTotalQty > 0 ? (ord.executedQty / leaderTotalQty) : 1;
+
+                // Harga mark/eksekusi untuk valuasi nilai notional ($5 USDT rule Binance Futures)
+                const evalPrice = ord.avgPrice > 0 ? ord.avgPrice : (userPos.markPrice || userPos.entryPrice || 1);
+                const remainingQty = Math.max(0, userCurrentQty - targetCloseQty);
+                const remainingNotional = remainingQty * evalPrice;
+                const closeNotional = targetCloseQty * evalPrice;
+
+                // POIN 2: Jika Leader menutup >= 90% dari posisinya, pasti FULL CLOSE!
+                const isLeaderFullClose = leaderCloseRatio >= 0.90 || ord.executedQty >= leaderTotalQty;
+
+                // POIN 1: Proteksi Dust / Koin Receh (< $5 USDT rule Binance Futures)
+                // - Jika sisa koin setelah tutup bernilai < $5 USDT, tutup penuh 100% agar tidak jadi koin zombie
+                // - Jika volume yang hendak ditutup bernilai < $5 USDT, tutup penuh 100% agar tidak di-reject Binance
+                const isDustRemaining = remainingNotional < 5.0 || remainingQty < filter.minQty;
+                const isCloseTooSmall = closeNotional < 5.0 && (userCurrentQty * evalPrice) < 10.0;
+
+                const isFullClose = isLeaderFullClose || isDustRemaining || isCloseTooSmall || targetCloseQty >= userCurrentQty || (userCurrentQty - targetCloseQty) < filter.minQty;
+                const actualCloseQty = isFullClose ? binanceClient.roundQuantity(userCurrentQty, filter.stepSize) : targetCloseQty;
+
+                // Jika partial close di bawah batas minimal lot dan bukan full close, lewati
+                if (!isFullClose && actualCloseQty < filter.minQty) {
+                  this.log('INFO', `🎯 [Latest Records] Partial close ${ord.symbol} ${ord.positionSide} dilewati karena kuantitas (${actualCloseQty}) di bawah batas minimum Binance (${filter.minQty}).`);
                   continue;
                 }
-
-                const isFullClose = targetCloseQty >= userCurrentQty || (userCurrentQty - targetCloseQty) < filter.minQty;
-                const actualCloseQty = isFullClose ? userCurrentQty : targetCloseQty;
                 const pnl = ord.positionSide === 'LONG'
                   ? (ord.avgPrice - userPos.entryPrice) * actualCloseQty
                   : (userPos.entryPrice - ord.avgPrice) * actualCloseQty;
@@ -980,27 +1041,46 @@ export class CopyTradeEngine {
                   this.positionAvgCounts.delete(key);
                   this.saveVirtualState();
                   this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup Penuh)`);
+                  let closeSucceeded = false;
                   if (this.config.paperTrading) {
                     this.virtualWalletBalance += pnl;
                     this.virtualPositions.delete(key);
                     this.saveVirtualState();
                     this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi ${ord.symbol} ${ord.positionSide} ditutup penuh sinkron! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
+                    closeSucceeded = true;
                   } else {
-                    await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
-                    this.log('SUCCESS', `✅ Posisi ${ord.symbol} ${ord.positionSide} akun Anda berhasil ditutup penuh.`);
+                    try {
+                      await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
+                      this.log('SUCCESS', `✅ Posisi ${ord.symbol} ${ord.positionSide} akun Anda berhasil ditutup penuh.`);
+                      closeSucceeded = true;
+                    } catch (e: any) {
+                      const errMsg = e.response?.data?.msg || e.message;
+                      this.log('ERROR', `❌ Gagal menutup penuh ${ord.symbol}: ${errMsg}`);
+                      this.sendTelegram(
+                        `🚨 <b>CRITICAL: GAGAL MENUTUP POSISI [🟢 LIVE FUTURES]</b>\n\n` +
+                        `🪙 Simbol: <b>${ord.symbol}</b> (${ord.positionSide})\n` +
+                        `❌ Error: <code>${errMsg}</code>\n` +
+                        `⚠️ Leader sudah menutup posisi ini! Harap segera periksa dan tutup manual di Binance jika masih terbuka.`
+                      );
+                    }
                   }
 
-                  this.recordClosedTrade({
-                    symbol: ord.symbol,
-                    positionSide: ord.positionSide,
-                    action: 'FULL_CLOSE',
-                    qty: actualCloseQty,
-                    entryPrice: userPos.entryPrice,
-                    closePrice: ord.avgPrice,
-                    realizedPnl: Number(pnl.toFixed(2)),
-                    pnlPct: Number(pnlPct.toFixed(2)),
-                    isPaper: this.config.paperTrading,
-                  });
+                  if (closeSucceeded) {
+                    userPositionsMap.delete(key);
+                    const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === key);
+                    if (uIdx !== -1) userPositions.splice(uIdx, 1);
+                    this.recordClosedTrade({
+                      symbol: ord.symbol,
+                      positionSide: ord.positionSide,
+                      action: 'FULL_CLOSE',
+                      qty: actualCloseQty,
+                      entryPrice: userPos.entryPrice,
+                      closePrice: ord.avgPrice,
+                      realizedPnl: Number(pnl.toFixed(2)),
+                      pnlPct: Number(pnlPct.toFixed(2)),
+                      isPaper: this.config.paperTrading,
+                    });
+                  }
                 } else {
                   const existingStream = this.streamLeaderPositions.get(key);
                   if (existingStream) {
@@ -1011,6 +1091,7 @@ export class CopyTradeEngine {
                     this.saveVirtualState();
                   }
                   this.log('INFO', `🎯 [Latest Records] Leader PARTIAL CLOSE ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup ${actualCloseQty})`);
+                  let partialCloseSucceeded = false;
                   if (this.config.paperTrading) {
                     const remainingQty = userCurrentQty - actualCloseQty;
                     this.virtualWalletBalance += pnl;
@@ -1020,22 +1101,39 @@ export class CopyTradeEngine {
                     this.virtualPositions.set(key, userPos);
                     this.saveVirtualState();
                     this.log('SUCCESS', `🧪 [MODE SIMULASI] Partial close ${ord.symbol} selesai (-${actualCloseQty}). PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Sisa: ${remainingQty.toFixed(4)} koin)`);
+                    partialCloseSucceeded = true;
                   } else {
-                    await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
-                    this.log('SUCCESS', `✅ Partial close ${ord.symbol} (-${actualCloseQty}) berhasil dieksekusi.`);
+                    try {
+                      await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
+                      this.log('SUCCESS', `✅ Partial close ${ord.symbol} (-${actualCloseQty}) berhasil dieksekusi.`);
+                      partialCloseSucceeded = true;
+                    } catch (e: any) {
+                      const errMsg = e.response?.data?.msg || e.message;
+                      this.log('ERROR', `❌ Gagal partial close ${ord.symbol}: ${errMsg}`);
+                      this.sendTelegram(
+                        `⚠️ <b>GAGAL MENUTUP PARSIAL [🟢 LIVE FUTURES]</b>\n\n` +
+                        `🪙 Simbol: <b>${ord.symbol}</b> (${ord.positionSide})\n` +
+                        `❌ Error: <code>${errMsg}</code>`
+                      );
+                    }
                   }
 
-                  this.recordClosedTrade({
-                    symbol: ord.symbol,
-                    positionSide: ord.positionSide,
-                    action: 'PARTIAL_CLOSE',
-                    qty: actualCloseQty,
-                    entryPrice: userPos.entryPrice,
-                    closePrice: ord.avgPrice,
-                    realizedPnl: Number(pnl.toFixed(2)),
-                    pnlPct: Number(pnlPct.toFixed(2)),
-                    isPaper: this.config.paperTrading,
-                  });
+                  if (partialCloseSucceeded) {
+                    const remainingQty = Math.max(0, userCurrentQty - actualCloseQty);
+                    userPos.positionAmt = ord.positionSide === 'LONG' ? remainingQty : -remainingQty;
+                    userPos.notional = remainingQty * (ord.avgPrice || userPos.entryPrice || 0);
+                    this.recordClosedTrade({
+                      symbol: ord.symbol,
+                      positionSide: ord.positionSide,
+                      action: 'PARTIAL_CLOSE',
+                      qty: actualCloseQty,
+                      entryPrice: userPos.entryPrice,
+                      closePrice: ord.avgPrice,
+                      realizedPnl: Number(pnl.toFixed(2)),
+                      pnlPct: Number(pnlPct.toFixed(2)),
+                      isPaper: this.config.paperTrading,
+                    });
+                  }
                 }
               }
             }
@@ -1134,7 +1232,12 @@ export class CopyTradeEngine {
             this.log('INFO', `🎯 LEADER MENUTUP POSISI: ${prevLeaderPos.symbol} ${prevLeaderPos.positionSide}. Menutup posisi akun pengguna...`);
             const userPos = userPositionsMap.get(key);
             if (userPos && Math.abs(userPos.positionAmt) > 0) {
-              await this.handleFullClose(prevLeaderPos, userPos);
+              const closed = await this.handleFullClose(prevLeaderPos, userPos);
+              if (closed) {
+                userPositionsMap.delete(key);
+                const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === key);
+                if (uIdx !== -1) userPositions.splice(uIdx, 1);
+              }
             } else {
               this.log('INFO', `Akun Anda sudah tidak memiliki posisi aktif di ${prevLeaderPos.symbol}`);
             }
@@ -1364,7 +1467,7 @@ export class CopyTradeEngine {
 
       // Eksekusi order buka posisi riil di Binance
       this.log('INFO', `🚀 Mengirim order MARKET: ${side} ${targetQty} ${leaderPos.symbol}...`);
-      const orderRes = await binanceClient.placeMarketOrder(leaderPos.symbol, side, targetQty, false);
+      const orderRes = await binanceClient.placeMarketOrder(leaderPos.symbol, side, targetQty, false, leaderPos.positionSide);
       this.log('SUCCESS', `✅ Order BERHASIL dieksekusi! ID: ${orderRes.orderId || 'OK'} (${side} ${targetQty} ${leaderPos.symbol})`);
       const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
       const title = isAveragingDown
@@ -1383,7 +1486,15 @@ export class CopyTradeEngine {
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
     } catch (e: any) {
-      this.log('ERROR', `❌ Gagal eksekusi order ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
+      const errMsg = e.response?.data?.msg || e.message;
+      this.log('ERROR', `❌ Gagal eksekusi order ${leaderPos.symbol}: ${errMsg}`);
+      this.sendTelegram(
+        `⚠️ <b>ORDER GAGAL DIEKSEKUSI [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
+        `⚡ Aksi: Buka Posisi (${side} ${targetQty})\n` +
+        `❌ Error: <code>${errMsg}</code>\n` +
+        `💡 Tips: Periksa saldo margin USDT atau batasan akun di Binance Anda.`
+      );
     }
   }
 
@@ -1467,7 +1578,7 @@ export class CopyTradeEngine {
 
       const side: 'BUY' | 'SELL' = leaderPos.positionSide === 'LONG' ? 'BUY' : 'SELL';
       this.log('INFO', `➕ Menambah posisi (ke-${counts.user}x) ${leaderPos.symbol} sebanyak ${addQty}...`);
-      await binanceClient.placeMarketOrder(leaderPos.symbol, side, addQty, false);
+      await binanceClient.placeMarketOrder(leaderPos.symbol, side, addQty, false, leaderPos.positionSide);
       this.log('SUCCESS', `✅ Berhasil menambah posisi ${leaderPos.symbol} (+${addQty})`);
       this.sendTelegram(
         `➕ <b>ORDER AVERAGING DOWN [🟢 LIVE FUTURES]</b>\n\n` +
@@ -1481,7 +1592,13 @@ export class CopyTradeEngine {
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
     } catch (e: any) {
-      this.log('ERROR', `Gagal menambah posisi ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
+      const errMsg = e.response?.data?.msg || e.message;
+      this.log('ERROR', `Gagal menambah posisi ${leaderPos.symbol}: ${errMsg}`);
+      this.sendTelegram(
+        `⚠️ <b>ORDER AVERAGING GAGAL [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
+        `❌ Error: <code>${errMsg}</code>`
+      );
     }
   }
 
@@ -1498,13 +1615,6 @@ export class CopyTradeEngine {
     if (userCurrentQty <= 0) return;
 
     const closeRatio = closedLeaderAmount / prevTotalLeaderQty;
-    let closeQty = userCurrentQty * closeRatio;
-
-    const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
-    closeQty = binanceClient.roundQuantity(closeQty, filter.stepSize);
-
-    if (closeQty < filter.minQty) return;
-
     let exitPrice = 0;
     try {
       exitPrice = await binanceClient.getSymbolPrice(leaderPos.symbol);
@@ -1513,6 +1623,18 @@ export class CopyTradeEngine {
       exitPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : (existingUserPos.markPrice > 0 ? existingUserPos.markPrice : existingUserPos.entryPrice);
     }
 
+    const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
+    let closeQty = binanceClient.roundQuantity(userCurrentQty * closeRatio, filter.stepSize);
+
+    // Proteksi Dust (< $5 USDT) & Smart Full Close (Leader tutup >= 90%)
+    const remainingQty = Math.max(0, userCurrentQty - closeQty);
+    const remainingNotional = remainingQty * exitPrice;
+    if (closeRatio >= 0.90 || remainingNotional < 5.0 || remainingQty < filter.minQty) {
+      closeQty = userCurrentQty;
+    }
+
+    if (closeQty < filter.minQty) return;
+
     const pnl = existingUserPos.positionSide === 'LONG'
       ? (exitPrice - existingUserPos.entryPrice) * closeQty
       : (existingUserPos.entryPrice - exitPrice) * closeQty;
@@ -1520,6 +1642,7 @@ export class CopyTradeEngine {
       ? ((exitPrice - existingUserPos.entryPrice) / existingUserPos.entryPrice) * (existingUserPos.positionSide === 'LONG' ? 1 : -1) * 100 * (existingUserPos.leverage || 10)
       : 0;
 
+    let partialCloseSucceeded = false;
     if (this.config.paperTrading) {
       const posKey = `${leaderPos.symbol}_${existingUserPos.positionSide}`;
       const oldQty = Math.abs(existingUserPos.positionAmt);
@@ -1535,31 +1658,44 @@ export class CopyTradeEngine {
       }
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Partial Close: ${leaderPos.symbol} (-${closeQty}). PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
+      partialCloseSucceeded = true;
     } else {
       try {
         const side: 'LONG' | 'SHORT' = existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT';
         this.log('INFO', `✂️ Menutup parsial ${leaderPos.symbol} (${(closeRatio * 100).toFixed(1)}%, Vol: ${closeQty})...`);
         await binanceClient.closePosition(leaderPos.symbol, side, closeQty);
         this.log('SUCCESS', `✅ Sukses partial close ${leaderPos.symbol} (${closeQty})`);
+        partialCloseSucceeded = true;
       } catch (e: any) {
-        this.log('ERROR', `Gagal partial close ${leaderPos.symbol}: ${e.response?.data?.msg || e.message}`);
+        const errMsg = e.response?.data?.msg || e.message;
+        this.log('ERROR', `Gagal partial close ${leaderPos.symbol}: ${errMsg}`);
+        this.sendTelegram(
+          `⚠️ <b>GAGAL PARTIAL CLOSE [🟢 LIVE FUTURES]</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${existingUserPos.positionSide})\n` +
+          `❌ Error: <code>${errMsg}</code>`
+        );
       }
     }
 
-    this.recordClosedTrade({
-      symbol: leaderPos.symbol,
-      positionSide: existingUserPos.positionSide as any,
-      action: 'PARTIAL_CLOSE',
-      qty: closeQty,
-      entryPrice: existingUserPos.entryPrice,
-      closePrice: exitPrice,
-      realizedPnl: Number(pnl.toFixed(2)),
-      pnlPct: Number(pnlPct.toFixed(2)),
-      isPaper: this.config.paperTrading,
-    });
+    if (partialCloseSucceeded) {
+      const remainingQty = Math.max(0, userCurrentQty - closeQty);
+      existingUserPos.positionAmt = existingUserPos.positionSide === 'LONG' ? remainingQty : -remainingQty;
+      existingUserPos.notional = remainingQty * exitPrice;
+      this.recordClosedTrade({
+        symbol: leaderPos.symbol,
+        positionSide: existingUserPos.positionSide as any,
+        action: 'PARTIAL_CLOSE',
+        qty: closeQty,
+        entryPrice: existingUserPos.entryPrice,
+        closePrice: exitPrice,
+        realizedPnl: Number(pnl.toFixed(2)),
+        pnlPct: Number(pnlPct.toFixed(2)),
+        isPaper: this.config.paperTrading,
+      });
+    }
   }
 
-  private async handleFullClose(leaderPos: LeadPosition, existingUserPos: UserPosition) {
+  private async handleFullClose(leaderPos: LeadPosition, existingUserPos: UserPosition): Promise<boolean> {
     const qty = Math.abs(existingUserPos.positionAmt);
     const side: 'LONG' | 'SHORT' = existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT';
 
@@ -1578,6 +1714,7 @@ export class CopyTradeEngine {
       ? ((exitPrice - existingUserPos.entryPrice) / existingUserPos.entryPrice) * (side === 'LONG' ? 1 : -1) * 100 * (existingUserPos.leverage || 10)
       : 0;
 
+    let fullCloseSucceeded = false;
     if (this.config.paperTrading) {
       const posKey = `${existingUserPos.symbol}_${side}`;
       this.virtualWalletBalance += pnl;
@@ -1585,29 +1722,41 @@ export class CopyTradeEngine {
       this.positionAvgCounts.delete(posKey);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Posisi ${existingUserPos.symbol} ${side} DITUTUP LENGKAP! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT. Saldo simulasi: $${this.virtualWalletBalance.toFixed(2)} USDT`);
+      fullCloseSucceeded = true;
     } else {
       const posKey = `${existingUserPos.symbol}_${side}`;
-      this.positionAvgCounts.delete(posKey);
       try {
         this.log('INFO', `🚪 Mengirim order Market Close untuk ${existingUserPos.symbol} (Qty: ${qty})...`);
         await binanceClient.closePosition(existingUserPos.symbol, side, qty);
+        this.positionAvgCounts.delete(posKey);
         this.log('SUCCESS', `✅ Posisi ${existingUserPos.symbol} ${side} BERHASIL DITUTUP SEMPURNA!`);
+        fullCloseSucceeded = true;
       } catch (e: any) {
-        this.log('ERROR', `Gagal menutup posisi ${existingUserPos.symbol}: ${e.response?.data?.msg || e.message}`);
+        const errMsg = e.response?.data?.msg || e.message;
+        this.log('ERROR', `Gagal menutup posisi ${existingUserPos.symbol}: ${errMsg}`);
+        this.sendTelegram(
+          `🚨 <b>CRITICAL: GAGAL MENUTUP POSISI [🟢 LIVE FUTURES]</b>\n\n` +
+          `🪙 Simbol: <b>${existingUserPos.symbol}</b> (${side})\n` +
+          `❌ Error: <code>${errMsg}</code>\n` +
+          `⚠️ Leader sudah menutup posisi ini! Harap segera periksa dan tutup manual di Binance.`
+        );
       }
     }
 
-    this.recordClosedTrade({
-      symbol: existingUserPos.symbol,
-      positionSide: side,
-      action: 'FULL_CLOSE',
-      qty,
-      entryPrice: existingUserPos.entryPrice,
-      closePrice: exitPrice,
-      realizedPnl: Number(pnl.toFixed(2)),
-      pnlPct: Number(pnlPct.toFixed(2)),
-      isPaper: this.config.paperTrading,
-    });
+    if (fullCloseSucceeded) {
+      this.recordClosedTrade({
+        symbol: existingUserPos.symbol,
+        positionSide: side,
+        action: 'FULL_CLOSE',
+        qty,
+        entryPrice: existingUserPos.entryPrice,
+        closePrice: exitPrice,
+        realizedPnl: Number(pnl.toFixed(2)),
+        pnlPct: Number(pnlPct.toFixed(2)),
+        isPaper: this.config.paperTrading,
+      });
+    }
+    return fullCloseSucceeded;
   }
 
   async panicCloseAll(): Promise<string> {

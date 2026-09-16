@@ -411,4 +411,13 @@ server.listen(PORT, async () => {
   setTimeout(() => {
     engine.fetchLeaderSnapshot().catch(() => {});
   }, 1000);
+
+  // AUTO-RESUME: Jika sebelum restart status trading AKTIF (copyTradeActive: true), otomatis langsung ON!
+  const cfg = engine.getConfig();
+  if (cfg.copyTradeActive) {
+    console.log(`[Auto-Start] 🟢 Parameter copyTradeActive bernilai ON (Aktif). Menyalakan engine otomatis...`);
+    engine.start(true);
+  } else {
+    console.log(`[Auto-Start] ⏸️ Parameter copyTradeActive bernilai OFF (Standby). Menunggu tombol Start dari Dashboard.`);
+  }
 });
