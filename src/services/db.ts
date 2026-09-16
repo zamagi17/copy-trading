@@ -78,6 +78,9 @@ export class DatabaseService {
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS processed_order_keys JSONB DEFAULT '[]'::jsonb;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS is_holiday_aborted BOOLEAN DEFAULT FALSE;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS holiday_aborted_reason TEXT DEFAULT '';
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS holiday_aborted_at BIGINT DEFAULT 0;
         `);
 
         // 3. Tabel Riwayat Transaksi Selesai
@@ -327,6 +330,9 @@ export class DatabaseService {
             positionAvgCounts: row.position_avg_counts || [],
             lastProcessedOrderTime: Number(row.last_processed_order_time || 0),
             processedOrderKeys: Array.isArray(row.processed_order_keys) ? row.processed_order_keys : [],
+            isHolidayAborted: Boolean(row.is_holiday_aborted),
+            holidayAbortedReason: row.holiday_aborted_reason || '',
+            holidayAbortedAt: Number(row.holiday_aborted_at || 0),
           };
         }
       } catch (e: any) {
@@ -343,12 +349,15 @@ export class DatabaseService {
     positionAvgCounts: any[];
     lastProcessedOrderTime: number;
     processedOrderKeys?: string[];
+    isHolidayAborted?: boolean;
+    holidayAbortedReason?: string;
+    holidayAbortedAt?: number;
   }): Promise<void> {
     if (this.isConnected && this.pool) {
       try {
         await this.pool.query(
-          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, updated_at)
-           VALUES (1, $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, is_holiday_aborted, holiday_aborted_reason, holiday_aborted_at, updated_at)
+           VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
            ON CONFLICT (id) DO UPDATE SET
              virtual_wallet_balance = $1,
              virtual_positions = $2,
@@ -356,6 +365,9 @@ export class DatabaseService {
              position_avg_counts = $4,
              last_processed_order_time = $5,
              processed_order_keys = $6,
+             is_holiday_aborted = $7,
+             holiday_aborted_reason = $8,
+             holiday_aborted_at = $9,
              updated_at = CURRENT_TIMESTAMP;`,
           [
             data.virtualWalletBalance,
@@ -364,6 +376,9 @@ export class DatabaseService {
             JSON.stringify(data.positionAvgCounts),
             data.lastProcessedOrderTime,
             JSON.stringify(data.processedOrderKeys || []),
+            Boolean(data.isHolidayAborted),
+            data.holidayAbortedReason || '',
+            Number(data.holidayAbortedAt || 0),
           ]
         );
       } catch (e: any) {

@@ -416,6 +416,19 @@ app.post('/api/schedule', requireAuth, (req, res) => {
   }
 });
 
+app.post('/api/weekend-break/reset-abort', requireAuth, (req, res) => {
+  try {
+    engine.resetWeekendHoliday();
+    res.json({
+      success: true,
+      message: 'Status pembatalan libur akhir pekan berhasil di-reset.',
+      status: engine.getStatus(),
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 app.post('/api/clear-logs', requireAuth, (req, res) => {
   engine.clearLogs();
   res.json({ success: true, message: 'Log terminal telah dibersihkan.' });

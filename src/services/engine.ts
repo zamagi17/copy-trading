@@ -27,6 +27,9 @@ export class CopyTradeEngine {
   private lastSessionKey: string = '';
   private lastUserPositionsCount: number = 0;
   private isHolidayActive: boolean = false;
+  private isHolidayAborted: boolean = false;
+  private holidayAbortedReason: string = '';
+  private holidayAbortedAt: number = 0;
   private isScheduleSleeping: boolean = false;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public streamLeaderPositions: Map<string, LeadPosition> = new Map();
@@ -84,6 +87,11 @@ export class CopyTradeEngine {
         if (Array.isArray(dbVs.processedOrderKeys)) {
           this.processedOrderKeys = new Set(dbVs.processedOrderKeys);
         }
+        if (typeof dbVs.isHolidayAborted === 'boolean') {
+          this.isHolidayAborted = dbVs.isHolidayAborted;
+          this.holidayAbortedReason = dbVs.holidayAbortedReason || '';
+          this.holidayAbortedAt = dbVs.holidayAbortedAt || 0;
+        }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual dari PostgreSQL (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
         }
@@ -110,6 +118,9 @@ export class CopyTradeEngine {
         positionAvgCounts: Array.from(this.positionAvgCounts.entries()),
         lastProcessedOrderTime: this.lastProcessedOrderTime,
         processedOrderKeys: Array.from(this.processedOrderKeys).slice(-500),
+        isHolidayAborted: this.isHolidayAborted,
+        holidayAbortedReason: this.holidayAbortedReason,
+        holidayAbortedAt: this.holidayAbortedAt,
       };
       fs.writeFileSync(VIRTUAL_STATE_PATH, JSON.stringify(data, null, 2), 'utf-8');
       dbService.saveVirtualState(data).catch(() => {});
@@ -143,6 +154,11 @@ export class CopyTradeEngine {
         }
         if (Array.isArray(data.processedOrderKeys)) {
           this.processedOrderKeys = new Set(data.processedOrderKeys);
+        }
+        if (typeof data.isHolidayAborted === 'boolean') {
+          this.isHolidayAborted = data.isHolidayAborted;
+          this.holidayAbortedReason = data.holidayAbortedReason || '';
+          this.holidayAbortedAt = data.holidayAbortedAt || 0;
         }
         if (this.virtualPositions.size > 0) {
           this.log('INFO', `💾 Memulihkan ${this.virtualPositions.size} posisi virtual tersimpan dari disk (Saldo: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
@@ -260,10 +276,12 @@ export class CopyTradeEngine {
             blockNewTrades: true,
             smartReEntryEnabled: true,
             reEntryWindowMinutes: 30,
+            autoAbortOnLeaderTrade: true,
           };
         } else {
           if (parsed.weekendBreak.smartReEntryEnabled === undefined) parsed.weekendBreak.smartReEntryEnabled = true;
           if (parsed.weekendBreak.reEntryWindowMinutes === undefined) parsed.weekendBreak.reEntryWindowMinutes = 30;
+          if (parsed.weekendBreak.autoAbortOnLeaderTrade === undefined) parsed.weekendBreak.autoAbortOnLeaderTrade = true;
         }
         if (!parsed.dailySchedule) {
           parsed.dailySchedule = {
@@ -303,6 +321,7 @@ export class CopyTradeEngine {
         blockNewTrades: true,
         smartReEntryEnabled: true,
         reEntryWindowMinutes: 30,
+        autoAbortOnLeaderTrade: true,
       },
       dailySchedule: {
         enabled: false,
@@ -565,7 +584,8 @@ export class CopyTradeEngine {
       }
     }
 
-    const isHolidayActive = Boolean(cfg?.enabled && isWeekend && !hasOpenPositions && !inReEntryWindow);
+    // Libur aktif HANYA jika enabled, akhir pekan CST, tidak ada posisi terbuka, di luar re-entry window, DAN belum dibatalkan oleh transaksi leader
+    const isHolidayActive = Boolean(cfg?.enabled && isWeekend && !hasOpenPositions && !inReEntryWindow && !this.isHolidayAborted);
 
     return {
       isWeekendCST: isWeekend,
@@ -573,10 +593,65 @@ export class CopyTradeEngine {
       isHolidayActive,
       inReEntryWindow,
       reEntryRemainingMins,
+      isHolidayAborted: this.isHolidayAborted,
+      abortedReason: this.holidayAbortedReason,
+      abortedAt: this.holidayAbortedAt,
       cstTimeStr: times.cstTimeStr,
       wibTimeStr: times.wibTimeStr,
       resumeTimeStr: 'Senin 00:00 CST (Minggu 23:00 WIB)',
     };
+  }
+
+  /**
+   * Membatalkan Mode Libur Akhir Pekan seketika jika polling mendeteksi transaksi leader.
+   */
+  public abortWeekendHoliday(reason: string, details?: string) {
+    if (this.isHolidayAborted) return;
+
+    this.isHolidayAborted = true;
+    this.isHolidayActive = false;
+    this.holidayAbortedReason = reason;
+    this.holidayAbortedAt = Date.now();
+    this.saveVirtualState();
+
+    const times = this.getTimes();
+    const timeStr = `${times.wibTimeStr} WIB (${times.cstTimeStr} CST)`;
+
+    this.log('WARN', `🚨 [LEADER AKTIF DI AKHIR PEKAN] Terdeteksi transaksi (${reason}) dari Leader saat mode libur akhir pekan! Mode libur otomatis DIBATALKAN. Bot kembali ke mode aktif penuh untuk menyalin trade!`);
+
+    this.sendTelegram(
+      `🚨 <b>[LEADER AKTIF DI AKHIR PEKAN - LIBUR DIBATALKAN]</b>\n\n` +
+      `Terdeteksi transaksi baru dari Leader saat bot berada di mode libur akhir pekan:\n` +
+      `⚡ <b>${reason}</b>\n` +
+      (details ? `ℹ️ Detail: <code>${details}</code>\n` : '') +
+      `🕒 Waktu: <b>${timeStr}</b>\n\n` +
+      `🟢 <b>TINDAKAN OTOMATIS:</b>\n` +
+      `1. Mode libur akhir pekan otomatis <b>DIBATALKAN</b>.\n` +
+      `2. Polling standby (60s) dikembalikan ke <b>kecepatan penuh</b>.\n` +
+      `3. Transaksi Leader langsung <b>disalin / dieksekusi</b> ke akun Anda!`
+    );
+
+    if (this.wsBroadcaster) {
+      this.wsBroadcaster('TICK', {
+        status: this.getStatus(),
+      });
+    }
+  }
+
+  /**
+   * Reset status pembatalan libur akhir pekan secara manual.
+   */
+  public resetWeekendHoliday() {
+    this.isHolidayAborted = false;
+    this.holidayAbortedReason = '';
+    this.holidayAbortedAt = 0;
+    this.saveVirtualState();
+    this.log('INFO', '🌴 Status pembatalan libur akhir pekan telah di-reset. Mode libur dapat aktif kembali jika tidak ada posisi terbuka.');
+    if (this.wsBroadcaster) {
+      this.wsBroadcaster('TICK', {
+        status: this.getStatus(),
+      });
+    }
   }
 
   /**
@@ -1012,10 +1087,18 @@ export class CopyTradeEngine {
           this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Seluruh posisi bersih (0 posisi terbuka). Bot memasuki Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Polling dialihkan ke mode standby (${this.config.weekendBreak.standbyIntervalSec || 60}s) hingga ${weekendStatus.resumeTimeStr}.`);
           this.sendTelegramRateLimited('WEEKEND_ENTER', `🌴 <b>[MODE LIBUR AKHIR PEKAN AKTIF]</b>\n\nSeluruh posisi akun Anda bersih (0 posisi terbuka).\nSesuai jadwal Waktu China (CST, UTC+8), bot beristirahat hemat kuota hingga <b>${weekendStatus.resumeTimeStr}</b>.`);
         }
-      } else if (this.isHolidayActive && !weekendStatus.isWeekendCST) {
-        this.isHolidayActive = false;
-        this.log('SUCCESS', `🌅 [PASAR BUKA] Akhir pekan telah berakhir (Waktu China: ${weekendStatus.cstTimeStr}). Mode Libur Akhir Pekan selesai! Copy trade kembali aktif normal.`);
-        this.sendTelegramRateLimited('WEEKEND_EXIT', `🌅 <b>[COPY TRADE KEMBALI AKTIF]</b>\n\nAkhir pekan telah berakhir. Bot copy trade telah kembali aktif penuh memantau transaksi leader.`);
+      } else if (!weekendStatus.isWeekendCST) {
+        if (this.isHolidayActive) {
+          this.isHolidayActive = false;
+          this.log('SUCCESS', `🌅 [PASAR BUKA] Akhir pekan telah berakhir (Waktu China: ${weekendStatus.cstTimeStr}). Mode Libur Akhir Pekan selesai! Copy trade kembali aktif normal.`);
+          this.sendTelegramRateLimited('WEEKEND_EXIT', `🌅 <b>[COPY TRADE KEMBALI AKTIF]</b>\n\nAkhir pekan telah berakhir. Bot copy trade telah kembali aktif penuh memantau transaksi leader.`);
+        }
+        if (this.isHolidayAborted) {
+          this.isHolidayAborted = false;
+          this.holidayAbortedReason = '';
+          this.holidayAbortedAt = 0;
+          this.saveVirtualState();
+        }
       }
     }
 
@@ -1047,6 +1130,13 @@ export class CopyTradeEngine {
               return notProcessed && isRecent;
             })
             .sort((a, b) => a.orderTime - b.orderTime); // urutkan kronologis dari lama ke baru
+
+          // AUTO-ABORT LIBUR AKHIR PEKAN JIKA ADA TRANSAKSI BARU DARI LEADER
+          if (newOrders.length > 0 && this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+            const firstOrd = newOrders[0];
+            const orderDesc = `${firstOrd.action} ${firstOrd.symbol} (${firstOrd.positionSide}) @ $${firstOrd.avgPrice || 0}`;
+            this.abortWeekendHoliday(`Order baru: ${orderDesc}`, `${newOrders.length} transaksi baru terdeteksi pada feed stream leader`);
+          }
 
           for (const ord of newOrders) {
             if (ord.orderKey) {
@@ -1323,6 +1413,10 @@ export class CopyTradeEngine {
         this.isFirstTick = false;
         this.lastLeaderPositions = new Map(currentLeaderMap);
         this.log('INFO', `📡 [BASELINE COLD START] Sinkronisasi ${currentLeaderMap.size} posisi aktif leader sebagai baseline. Bot siap mengeksekusi order baru begitu leader bertransaksi!`);
+        if (currentLeaderMap.size > 0 && weekendStatus.isWeekendCST && this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false) {
+          const syms = Array.from(currentLeaderMap.keys()).join(', ');
+          this.abortWeekendHoliday(`Leader memiliki posisi aktif (${syms})`, `Deteksi baseline posisi aktif leader di akhir pekan`);
+        }
       } else {
         for (const [key, leaderPos] of currentLeaderMap.entries()) {
           const prevLeaderPos = this.lastLeaderPositions.get(key);
@@ -1330,6 +1424,9 @@ export class CopyTradeEngine {
           if (!prevLeaderPos) {
             // POSISI BARU DIBUKA OLEH LEADER
             this.log('INFO', `🔥 DETEKSI POSISI BARU: Leader membuka ${leaderPos.positionSide} ${leaderPos.symbol} @ $${leaderPos.entryPrice} (Vol: ${leaderPos.amount})`);
+            if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+              this.abortWeekendHoliday(`Buka posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `Entry: $${leaderPos.entryPrice}, Vol: ${leaderPos.amount}`);
+            }
             await this.handleNewPosition(leaderPos, userBalance, userPositionsMap.get(key));
           } else {
             // POSISI SUDAH ADA SEBELUMNYA: Cek apakah leader menambah posisi (Averaging) atau partial close
@@ -1339,10 +1436,16 @@ export class CopyTradeEngine {
             if (deltaAmount > 0 && deltaPct >= 0.04) {
               // Leader Menambah Posisi (Averaging Down / Scaling In)
               this.log('INFO', `📈 LEADER MENAMBAH POSISI: ${leaderPos.symbol} ${leaderPos.positionSide} (+${deltaAmount.toFixed(4)} koin, +${(deltaPct * 100).toFixed(1)}%)`);
+              if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+                this.abortWeekendHoliday(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
+              }
               await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPositionsMap.get(key));
             } else if (deltaAmount < 0 && Math.abs(deltaPct) >= 0.04) {
               // Leader Partial Close
               this.log('INFO', `📉 LEADER PARTIAL CLOSE: ${leaderPos.symbol} ${leaderPos.positionSide} (-${Math.abs(deltaAmount).toFixed(4)} koin)`);
+              if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+                this.abortWeekendHoliday(`Partial close ${leaderPos.symbol} (${leaderPos.positionSide})`, `-${Math.abs(deltaAmount).toFixed(4)} koin`);
+              }
               await this.handlePartialClose(leaderPos, Math.abs(deltaAmount), prevLeaderPos.amount, userPositionsMap.get(key));
             }
           }
@@ -1352,6 +1455,9 @@ export class CopyTradeEngine {
         for (const [key, prevLeaderPos] of this.lastLeaderPositions.entries()) {
           if (!currentLeaderMap.has(key)) {
             this.log('INFO', `🎯 LEADER MENUTUP POSISI: ${prevLeaderPos.symbol} ${prevLeaderPos.positionSide}. Menutup posisi akun pengguna...`);
+            if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+              this.abortWeekendHoliday(`Tutup posisi ${prevLeaderPos.symbol} (${prevLeaderPos.positionSide})`, `Leader menutup penuh posisi`);
+            }
             const userPos = userPositionsMap.get(key);
             if (userPos && Math.abs(userPos.positionAmt) > 0) {
               const closed = await this.handleFullClose(prevLeaderPos, userPos);
@@ -1464,8 +1570,10 @@ export class CopyTradeEngine {
       (Date.now() - recentClose.closedAt) <= reEntryWindowMs
     );
 
-    if (this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
-      if (isAveragingDown) {
+    if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
+      if (this.config.weekendBreak?.autoAbortOnLeaderTrade !== false) {
+        this.abortWeekendHoliday(`Leader Membuka Posisi: ${leaderPos.symbol} (${leaderPos.positionSide})`, `Auto-abort dipicu di handleNewPosition`);
+      } else if (isAveragingDown) {
         this.log('INFO', `⚡ [LIBUR AKHIR PEKAN - AVG DOWN] Leader menambah muatan (Averaging Down) pada ${leaderPos.symbol} ${leaderPos.positionSide} yang SEDANG TERBUKA. Eksekusi penambahan posisi TETAP DILANJUTKAN untuk mengawal posisi aktif.`);
       } else if (isSmartReEntry) {
         const elapsedMins = Math.max(1, Math.round((Date.now() - (recentClose?.closedAt || Date.now())) / 60000));
@@ -1959,7 +2067,7 @@ export class CopyTradeEngine {
     // 1. Validasi proteksi Libur Akhir Pekan (jika tidak dibypass)
     if (!bypassWeekend) {
       const weekendStatus = this.getWeekendBreakStatus();
-      if (this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
+      if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
         this.log('WARN', `🌴 [TEST ORDER DITOLAK] Order uji coba ${symbol} ${positionSide} diblokir oleh Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Sistem berjalan normal menolak order baru saat libur!`);
         return {
           success: false,

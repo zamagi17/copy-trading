@@ -1074,6 +1074,7 @@ function updateEngineUI(status) {
   // Update Weekend Holiday Badge in Header
   if (holidayBadge && status?.weekendBreak) {
     const wb = status.weekendBreak;
+    const icon = document.getElementById('holidayBadgeIcon');
     if (wb.isHolidayActive && isEngineActive) {
       holidayBadge.style.display = 'flex';
       holidayBadge.style.background = 'rgba(16, 185, 129, 0.15)';
@@ -1081,6 +1082,15 @@ function updateEngineUI(status) {
       holidayBadge.style.color = '#34d399';
       if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_holiday', 'LIBUR AKHIR PEKAN (CST)');
       holidayBadge.title = `Mode Libur Aktif (${wb.cstTimeStr}). Standby polling aktif. Buka kembali: ${wb.resumeTimeStr}`;
+      if (icon) icon.setAttribute('data-lucide', 'palmtree');
+    } else if (wb.isHolidayAborted && isEngineActive) {
+      holidayBadge.style.display = 'flex';
+      holidayBadge.style.background = 'rgba(245, 158, 11, 0.2)';
+      holidayBadge.style.borderColor = 'rgba(245, 158, 11, 0.55)';
+      holidayBadge.style.color = '#fbbf24';
+      if (holidayBadgeText) holidayBadgeText.innerText = `🚨 LIBUR DIBATALKAN (LEADER AKTIF)`;
+      holidayBadge.title = `Mode libur dibatalkan karena Leader bertransaksi: "${wb.abortedReason || 'Transaksi terdeteksi'}". Bot aktif penuh! Klik untuk opsi reset libur.`;
+      if (icon) icon.setAttribute('data-lucide', 'zap');
     } else if (wb.inReEntryWindow && isEngineActive) {
       holidayBadge.style.display = 'flex';
       holidayBadge.style.background = 'rgba(56, 189, 248, 0.15)';
@@ -1088,6 +1098,7 @@ function updateEngineUI(status) {
       holidayBadge.style.color = '#38bdf8';
       if (holidayBadgeText) holidayBadgeText.innerText = `🎯 RE-ENTRY GRACE (${wb.reEntryRemainingMins || 30}M)`;
       holidayBadge.title = `Jendela Toleransi Smart Re-Entry Aktif: Bot siaga menangkap re-entry leader dalam ${wb.reEntryRemainingMins} menit ke depan sebelum libur.`;
+      if (icon) icon.setAttribute('data-lucide', 'target');
     } else if (wb.isWeekendCST && wb.hasOpenPositions && isEngineActive) {
       holidayBadge.style.display = 'flex';
       holidayBadge.style.background = 'rgba(234, 179, 8, 0.15)';
@@ -1095,9 +1106,11 @@ function updateEngineUI(status) {
       holidayBadge.style.color = '#fde047';
       if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_pending', 'MENUNGGU TUTUP POSISI');
       holidayBadge.title = `Akhir pekan Waktu China, bot tetap aktif mengawal posisi terbuka sebelum libur.`;
+      if (icon) icon.setAttribute('data-lucide', 'shield');
     } else {
       holidayBadge.style.display = 'none';
     }
+    lucide.createIcons({ root: holidayBadge });
   }
 
   // Update Daily Sleep Schedule Badge in Header
@@ -1967,6 +1980,8 @@ function openSettingsModal() {
   if (checkBlockWeekendNewTrades) checkBlockWeekendNewTrades.checked = wb?.blockNewTrades ?? true;
   if (checkSmartReEntry) checkSmartReEntry.checked = wb?.smartReEntryEnabled !== false;
   if (selectReEntryWindow) selectReEntryWindow.value = String(wb?.reEntryWindowMinutes || 30);
+  const checkAutoAbort = document.getElementById('checkAutoAbortWeekendOnTrade');
+  if (checkAutoAbort) checkAutoAbort.checked = wb?.autoAbortOnLeaderTrade !== false;
 
   togglePaperTradingInputs();
   toggleProxyInputs();
@@ -2103,13 +2118,19 @@ function toggleWeekendBreakInputs() {
   if (weekendModalCstClock) weekendModalCstClock.innerText = `China: ${cstStr}`;
   if (weekendModalWibClock) weekendModalWibClock.innerText = `WIB: ${wibStr}`;
   if (weekendModalStatusBadge) {
-    const isWeekend = cstTime.getDay() === 0 || cstTime.getDay() === 6;
-    if (isWeekend) {
-      weekendModalStatusBadge.innerText = 'Akhir Pekan CST';
-      weekendModalStatusBadge.className = 'badge badge-emerald';
+    const wb = currentStatus?.weekendBreak;
+    if (wb?.isHolidayAborted) {
+      weekendModalStatusBadge.innerText = 'Libur Dibatalkan (Leader Aktif)';
+      weekendModalStatusBadge.className = 'badge badge-amber';
     } else {
-      weekendModalStatusBadge.innerText = 'Hari Kerja CST (Aktif)';
-      weekendModalStatusBadge.className = 'badge badge-sky';
+      const isWeekend = cstTime.getDay() === 0 || cstTime.getDay() === 6;
+      if (isWeekend) {
+        weekendModalStatusBadge.innerText = 'Akhir Pekan CST';
+        weekendModalStatusBadge.className = 'badge badge-emerald';
+      } else {
+        weekendModalStatusBadge.innerText = 'Hari Kerja CST (Aktif)';
+        weekendModalStatusBadge.className = 'badge badge-sky';
+      }
     }
   }
 }
@@ -2214,6 +2235,7 @@ async function saveSettings() {
       blockNewTrades: checkBlockWeekendNewTrades ? checkBlockWeekendNewTrades.checked : true,
       smartReEntryEnabled: checkSmartReEntry ? checkSmartReEntry.checked : true,
       reEntryWindowMinutes: parseInt(selectReEntryWindow?.value || '30') || 30,
+      autoAbortOnLeaderTrade: document.getElementById('checkAutoAbortWeekendOnTrade') ? document.getElementById('checkAutoAbortWeekendOnTrade').checked : true,
     },
     ratioMultiplier: parseFloat(inputRatioMultiplier.value) || 1.0,
     fixedAmountUsdt: parseFloat(inputFixedAmount.value) || 25,
@@ -2593,5 +2615,39 @@ async function saveSchedule() {
       btnSaveSchedule.innerHTML = `<i data-lucide="check"></i> <span>Simpan Jadwal</span>`;
       lucide.createIcons({ root: btnSaveSchedule });
     }
+  }
+}
+
+// ==========================================
+// WEEKEND HOLIDAY AUTO-ABORT & RESET HANDLERS
+// ==========================================
+function handleHolidayBadgeClick() {
+  const wb = currentStatus?.weekendBreak;
+  if (!wb) return;
+  if (wb.isHolidayAborted) {
+    const confirmReset = confirm(`🚨 Mode Libur Akhir Pekan saat ini DIBATALKAN karena Leader bertransaksi:\n\n"${wb.abortedReason || 'Aktivitas terdeteksi'}"\n\nApakah Anda ingin mengaktifkan kembali (reset) mode libur akhir pekan sekarang?`);
+    if (confirmReset) {
+      resetWeekendHolidayAbort();
+    }
+  } else {
+    openSettingsModal();
+  }
+}
+
+async function resetWeekendHolidayAbort() {
+  try {
+    const res = await apiFetch('/api/weekend-break/reset-abort', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      alert('✅ ' + data.message);
+      if (data.status) {
+        currentStatus = data.status;
+        updateEngineUI(data.status);
+      }
+    } else {
+      alert('❌ Gagal reset: ' + data.message);
+    }
+  } catch (err) {
+    alert('❌ Error koneksi: ' + err.message);
   }
 }

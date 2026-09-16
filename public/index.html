@@ -65,8 +65,8 @@
           <span id="statusText">STANDBY</span>
         </div>
 
-        <div class="engine-badge badge-holiday" id="holidayBadge" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
-          <i data-lucide="palmtree" style="width: 14px; height: 14px;"></i>
+        <div class="engine-badge badge-holiday" id="holidayBadge" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer;" onclick="handleHolidayBadgeClick()" title="Status Libur Akhir Pekan">
+          <i data-lucide="palmtree" id="holidayBadgeIcon" style="width: 14px; height: 14px;"></i>
           <span id="holidayBadgeText">LIBUR AKHIR PEKAN</span>
         </div>
 
@@ -616,6 +616,20 @@
                 <small data-i18n="hint_reentry_window">Batas waktu leader untuk re-entry recovery sebelum bot mengunci libur penuh.</small>
               </div>
             </div>
+
+            <!-- Auto Abort on Leader Trade Row -->
+            <div class="form-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, 0.08);">
+              <div class="form-field checkbox-field" style="margin-top: 4px;">
+                <label class="custom-checkbox">
+                  <input type="checkbox" id="checkAutoAbortWeekendOnTrade" checked>
+                  <span class="checkmark"></span>
+                  <span style="font-weight: 700; color: #f59e0b;" data-i18n="check_auto_abort_weekend">Batalkan Libur Otomatis Jika Leader Bertransaksi (Auto-Abort)</span>
+                </label>
+                <small data-i18n="hint_auto_abort_weekend" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                  Jika polling 60 detik mendeteksi transaksi baru dari Leader di akhir pekan, mode libur seketika <strong>DIBATALKAN</strong>, notifikasi Telegram dikirim, dan bot kembali ke mode aktif penuh untuk mengeksekusi order.
+                </small>
+              </div>
+            </div>
           </div>
         </fieldset>
 
@@ -959,7 +973,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.3"></script>
+  <script src="app.js?v=2.4"></script>
   <script>
     lucide.createIcons();
   </script>
