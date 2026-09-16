@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus, DailyScheduleConfig, DailyScheduleStatus } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 import { telegramService } from './telegram';
@@ -27,6 +27,7 @@ export class CopyTradeEngine {
   private lastSessionKey: string = '';
   private lastUserPositionsCount: number = 0;
   private isHolidayActive: boolean = false;
+  private isScheduleSleeping: boolean = false;
   public virtualPositions: Map<string, UserPosition> = new Map();
   public streamLeaderPositions: Map<string, LeadPosition> = new Map();
   public positionAvgCounts: Map<string, { leader: number; user: number }> = new Map();
@@ -264,6 +265,15 @@ export class CopyTradeEngine {
           if (parsed.weekendBreak.smartReEntryEnabled === undefined) parsed.weekendBreak.smartReEntryEnabled = true;
           if (parsed.weekendBreak.reEntryWindowMinutes === undefined) parsed.weekendBreak.reEntryWindowMinutes = 30;
         }
+        if (!parsed.dailySchedule) {
+          parsed.dailySchedule = {
+            enabled: false,
+            startTime: '10:00',
+            endTime: '18:30',
+            action: 'FULL_STOP',
+            guardOpenPositions: true,
+          };
+        }
         return parsed;
       }
     } catch (e: any) {
@@ -293,6 +303,13 @@ export class CopyTradeEngine {
         blockNewTrades: true,
         smartReEntryEnabled: true,
         reEntryWindowMinutes: 30,
+      },
+      dailySchedule: {
+        enabled: false,
+        startTime: '10:00',
+        endTime: '18:30',
+        action: 'FULL_STOP',
+        guardOpenPositions: true,
       },
       proxy: {
         enabled: false,
@@ -562,6 +579,74 @@ export class CopyTradeEngine {
     };
   }
 
+  /**
+   * Mengembalikan status Jadwal Istirahat Harian (Sleep Schedule)
+   */
+  public getDailyScheduleStatus(overridePositionsCount?: number): DailyScheduleStatus {
+    const cfg = this.config.dailySchedule;
+    if (!cfg || !cfg.enabled) {
+      return {
+        enabled: false,
+        isSleeping: false,
+        startTime: cfg?.startTime || '10:00',
+        endTime: cfg?.endTime || '18:30',
+        action: cfg?.action || 'FULL_STOP',
+        resumeInText: '',
+        guardingPositions: false,
+      };
+    }
+
+    const times = this.getTimes();
+    const currentMins = times.wibHour * 60 + times.wibMinute;
+
+    const [startH, startM] = (cfg.startTime || '10:00').split(':').map((x) => parseInt(x, 10) || 0);
+    const [endH, endM] = (cfg.endTime || '18:30').split(':').map((x) => parseInt(x, 10) || 0);
+    const startTotalMins = startH * 60 + startM;
+    const endTotalMins = endH * 60 + endM;
+
+    let inScheduleWindow = false;
+    let diffMinsToResume = 0;
+
+    if (startTotalMins <= endTotalMins) {
+      // Rentang waktu dalam hari yang sama (misal 10:00 s/d 18:30)
+      inScheduleWindow = currentMins >= startTotalMins && currentMins < endTotalMins;
+      if (inScheduleWindow) {
+        diffMinsToResume = endTotalMins - currentMins;
+      }
+    } else {
+      // Rentang waktu melewati tengah malam (misal 22:00 s/d 06:00)
+      inScheduleWindow = currentMins >= startTotalMins || currentMins < endTotalMins;
+      if (inScheduleWindow) {
+        if (currentMins >= startTotalMins) {
+          diffMinsToResume = (1440 - currentMins) + endTotalMins;
+        } else {
+          diffMinsToResume = endTotalMins - currentMins;
+        }
+      }
+    }
+
+    const count = overridePositionsCount !== undefined ? overridePositionsCount : this.getUserPositionsCount();
+    const hasOpenPositions = count > 0;
+    const isGuarding = hasOpenPositions && (cfg.guardOpenPositions !== false);
+    const isSleeping = inScheduleWindow && !isGuarding;
+
+    const hoursLeft = Math.floor(diffMinsToResume / 60);
+    const minsLeft = diffMinsToResume % 60;
+    const resumeInText = inScheduleWindow
+      ? (hoursLeft > 0 ? `${hoursLeft} jam ${minsLeft} menit lagi (${cfg.endTime} WIB)` : `${minsLeft} menit lagi (${cfg.endTime} WIB)`)
+      : '';
+
+    return {
+      enabled: true,
+      isSleeping,
+      startTime: cfg.startTime || '10:00',
+      endTime: cfg.endTime || '18:30',
+      action: cfg.action || 'FULL_STOP',
+      resumeInText,
+      guardingPositions: inScheduleWindow && isGuarding,
+    };
+  }
+
   getCurrentPollingInfo(): PollingStatusInfo {
     const times = this.getTimes();
     const weekendStatus = this.getWeekendBreakStatus();
@@ -677,6 +762,7 @@ export class CopyTradeEngine {
       lastError: this.lastError,
       pollingInfo: this.getCurrentPollingInfo(),
       weekendBreak: weekendBreakStatus,
+      dailySchedule: this.getDailyScheduleStatus(count),
     };
   }
 
@@ -723,6 +809,39 @@ export class CopyTradeEngine {
   private async runLoop() {
     if (!this.isRunning) return;
 
+    const scheduleStatus = this.getDailyScheduleStatus();
+    const cfgSchedule = this.config.dailySchedule;
+
+    if (scheduleStatus.enabled && scheduleStatus.isSleeping) {
+      if (!this.isScheduleSleeping) {
+        this.isScheduleSleeping = true;
+        this.log('INFO', `💤 [JADWAL ISTIRAHAT AKTIF] Bot memasuki jam istirahat (${scheduleStatus.startTime} - ${scheduleStatus.endTime} WIB). Polling dihentikan untuk menghemat kuota proxy 100%. Akan otomatis aktif kembali ${scheduleStatus.resumeInText}.`);
+        this.sendTelegramRateLimited('SCHEDULE_SLEEP', `💤 <b>[JADWAL ISTIRAHAT AKTIF]</b>\n\nSesuai jadwal Anda (<b>${scheduleStatus.startTime} - ${scheduleStatus.endTime} WIB</b>), bot memasuki mode istirahat hemat kuota 100%.\n\nOtomatis aktif kembali: <b>${scheduleStatus.resumeInText}</b>.`);
+      }
+
+      // Broadcast update ke UI dashboard agar indikator istirahat segera terlihat
+      if (this.wsBroadcaster) {
+        this.wsBroadcaster('TICK', {
+          status: this.getStatus(),
+        });
+      }
+
+      if (scheduleStatus.action === 'FULL_STOP') {
+        // Mode FULL_STOP: Polling berhenti total (0 request / 0 kuota proxy)
+        // Timer lokal memeriksa setiap 5 detik secara gratis tanpa network request
+        if (this.isRunning) {
+          this.pollTimeout = setTimeout(() => this.runLoop(), 5000);
+        }
+        return;
+      }
+    } else {
+      if (this.isScheduleSleeping) {
+        this.isScheduleSleeping = false;
+        this.log('SUCCESS', `🌅 [JADWAL ISTIRAHAT SELESAI] Waktu istirahat telah berakhir (${cfgSchedule?.endTime} WIB). Engine otomatis KEMBALI AKTIF PENUH memantau transaksi leader!`);
+        this.sendTelegram(`🌅 <b>[JADWAL ISTIRAHAT SELESAI]</b>\n\nWaktu istirahat terjadwal (${cfgSchedule?.startTime} - ${cfgSchedule?.endTime} WIB) telah selesai. Bot copy trade telah otomatis <b>KEMBALI AKTIF PENUH</b> memantau transaksi leader!`);
+      }
+    }
+
     try {
       await this.executeTick();
       this.lastError = null;
@@ -733,8 +852,11 @@ export class CopyTradeEngine {
 
     // Interval acak (jitter ~15%) untuk menghindari ritme kaku dan deteksi bot
     const pollInfo = this.getCurrentPollingInfo();
-    const baseInterval = pollInfo.currentIntervalMs;
-    const jitter = pollInfo.isWeekendHoliday
+    let baseInterval = pollInfo.currentIntervalMs;
+    if (scheduleStatus.enabled && scheduleStatus.isSleeping && scheduleStatus.action === 'STANDBY') {
+      baseInterval = 60000; // Mode STANDBY lambat (60s) saat jam istirahat
+    }
+    const jitter = (pollInfo.isWeekendHoliday || (scheduleStatus.enabled && scheduleStatus.isSleeping))
       ? 0
       : Math.floor(Math.random() * (baseInterval * 0.2)) - Math.floor(baseInterval * 0.1);
     const interval = Math.max(800, Math.round(baseInterval + jitter));

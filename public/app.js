@@ -269,7 +269,10 @@ const I18N = {
     hint_test_amount: 'Nominal margin USDT untuk membuka posisi uji coba ini.',
     check_bypass_weekend: 'Bypass Libur Akhir Pekan',
     hint_bypass_weekend: 'Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan CST menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.',
-    btn_run_test_trade: 'Eksekusi Order Uji Coba'
+    btn_run_test_trade: 'Eksekusi Order Uji Coba',
+    btn_schedule: 'Jadwal Istirahat',
+    schedule_modal_title: 'Jadwal Istirahat / Auto Pause Polling',
+    btn_save_schedule: 'Simpan Jadwal'
   },
   en: {
     brand_subtitle: 'Proportional Ratio & Residential Proxy Engine',
@@ -521,7 +524,10 @@ const I18N = {
     hint_test_amount: 'USDT margin amount to open this test position.',
     check_bypass_weekend: 'Bypass Weekend Holiday',
     hint_bypass_weekend: 'If unchecked, tests whether the China CST weekend holiday rule blocks orders during weekend. If checked, forces order entry to test the position table.',
-    btn_run_test_trade: 'Execute Test Order'
+    btn_run_test_trade: 'Execute Test Order',
+    btn_schedule: 'Sleep Schedule',
+    schedule_modal_title: 'Sleep Schedule / Auto Pause Polling',
+    btn_save_schedule: 'Save Schedule'
   }
 };
 
@@ -1091,6 +1097,42 @@ function updateEngineUI(status) {
       holidayBadge.title = `Akhir pekan Waktu China, bot tetap aktif mengawal posisi terbuka sebelum libur.`;
     } else {
       holidayBadge.style.display = 'none';
+    }
+  }
+
+  // Update Daily Sleep Schedule Badge in Header
+  const scheduleBadge = document.getElementById('scheduleBadge');
+  const scheduleBadgeText = document.getElementById('scheduleBadgeText');
+  if (scheduleBadge && status?.dailySchedule) {
+    const ds = status.dailySchedule;
+    if (ds.enabled && ds.isSleeping && isEngineActive) {
+      scheduleBadge.style.display = 'flex';
+      scheduleBadge.style.background = 'rgba(139, 92, 246, 0.2)';
+      scheduleBadge.style.borderColor = 'rgba(139, 92, 246, 0.5)';
+      scheduleBadge.style.color = '#c4b5fd';
+      if (scheduleBadgeText) scheduleBadgeText.innerText = `💤 ISTIRAHAT (${ds.endTime} WIB)`;
+      scheduleBadge.title = `Mode Istirahat Aktif (${ds.startTime} - ${ds.endTime} WIB). Bangun: ${ds.resumeInText}`;
+      if (statusDot) statusDot.className = 'status-dot dot-purple';
+      if (statusText) {
+        statusText.innerText = `ISTIRAHAT (${ds.endTime})`;
+        statusText.style.color = '#c4b5fd';
+      }
+    } else if (ds.enabled && ds.guardingPositions && isEngineActive) {
+      scheduleBadge.style.display = 'flex';
+      scheduleBadge.style.background = 'rgba(56, 189, 248, 0.15)';
+      scheduleBadge.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+      scheduleBadge.style.color = '#38bdf8';
+      if (scheduleBadgeText) scheduleBadgeText.innerText = `🛡️ MENGAWAL POSISI`;
+      scheduleBadge.title = `Jam istirahat telah tiba, bot mengawal posisi terbuka hingga tertutup sebelum tidur.`;
+    } else if (ds.enabled && isEngineActive) {
+      scheduleBadge.style.display = 'flex';
+      scheduleBadge.style.background = 'rgba(139, 92, 246, 0.1)';
+      scheduleBadge.style.borderColor = 'rgba(139, 92, 246, 0.3)';
+      scheduleBadge.style.color = '#a78bfa';
+      if (scheduleBadgeText) scheduleBadgeText.innerText = `🕒 JADWAL: ${ds.startTime}-${ds.endTime}`;
+      scheduleBadge.title = `Jadwal istirahat aktif: Mulai tidur ${ds.startTime} WIB s/d ${ds.endTime} WIB.`;
+    } else {
+      scheduleBadge.style.display = 'none';
     }
   }
 
@@ -2416,4 +2458,140 @@ if ('serviceWorker' in navigator) {
       console.log('Service Worker gagal:', err);
     });
   });
+}
+
+// ==========================================
+// DAILY SCHEDULE (SLEEP / PAUSE) MODAL LOGIC
+// ==========================================
+const scheduleModal = document.getElementById('scheduleModal');
+const checkScheduleEnabled = document.getElementById('checkScheduleEnabled');
+const inputScheduleStartTime = document.getElementById('inputScheduleStartTime');
+const inputScheduleEndTime = document.getElementById('inputScheduleEndTime');
+const selectScheduleAction = document.getElementById('selectScheduleAction');
+const checkScheduleGuardPositions = document.getElementById('checkScheduleGuardPositions');
+const scheduleInputsContainer = document.getElementById('scheduleInputsContainer');
+const scheduleLiveBanner = document.getElementById('scheduleLiveBanner');
+const scheduleLiveText = document.getElementById('scheduleLiveText');
+const scheduleAlertBox = document.getElementById('scheduleAlertBox');
+const btnSaveSchedule = document.getElementById('btnSaveSchedule');
+
+function toggleScheduleInputs() {
+  if (!checkScheduleEnabled || !scheduleInputsContainer) return;
+  scheduleInputsContainer.style.opacity = checkScheduleEnabled.checked ? '1' : '0.45';
+  scheduleInputsContainer.style.pointerEvents = checkScheduleEnabled.checked ? 'auto' : 'none';
+}
+
+async function openScheduleModal() {
+  if (!scheduleModal) return;
+  if (scheduleAlertBox) {
+    scheduleAlertBox.style.display = 'none';
+    scheduleAlertBox.innerText = '';
+  }
+  scheduleModal.style.display = 'flex';
+  lucide.createIcons({ root: scheduleModal });
+  await loadScheduleData();
+}
+
+function closeScheduleModal() {
+  if (scheduleModal) {
+    scheduleModal.style.display = 'none';
+  }
+}
+
+async function loadScheduleData() {
+  try {
+    const res = await apiFetch('/api/schedule');
+    const data = await res.json();
+    if (data.success) {
+      const sch = data.schedule;
+      const st = data.status;
+      if (checkScheduleEnabled) checkScheduleEnabled.checked = Boolean(sch.enabled);
+      if (inputScheduleStartTime) inputScheduleStartTime.value = sch.startTime || '10:00';
+      if (inputScheduleEndTime) inputScheduleEndTime.value = sch.endTime || '18:30';
+      if (selectScheduleAction) selectScheduleAction.value = sch.action || 'FULL_STOP';
+      if (checkScheduleGuardPositions) checkScheduleGuardPositions.checked = sch.guardOpenPositions !== false;
+      toggleScheduleInputs();
+
+      if (scheduleLiveBanner && scheduleLiveText) {
+        if (!st.enabled) {
+          scheduleLiveBanner.style.background = 'rgba(100, 116, 139, 0.15)';
+          scheduleLiveBanner.style.borderColor = 'rgba(100, 116, 139, 0.3)';
+          scheduleLiveBanner.style.color = '#94a3b8';
+          scheduleLiveText.innerHTML = `<strong>Status:</strong> Jadwal Istirahat saat ini <strong>NONAKTIF</strong>. Bot beroperasi normal 24 jam.`;
+        } else if (st.isSleeping) {
+          scheduleLiveBanner.style.background = 'rgba(139, 92, 246, 0.2)';
+          scheduleLiveBanner.style.borderColor = 'rgba(139, 92, 246, 0.5)';
+          scheduleLiveBanner.style.color = '#c4b5fd';
+          const modeLabel = st.action === 'FULL_STOP' ? 'Berhenti Total (0 request / Hemat Kuota 100%)' : 'Standby Lambat (60s)';
+          scheduleLiveText.innerHTML = `💤 <strong>SEDANG ISTIRAHAT:</strong> Mode ${modeLabel}. Otomatis bangun & aktif kembali: <strong>${st.resumeInText}</strong>.`;
+        } else if (st.guardingPositions) {
+          scheduleLiveBanner.style.background = 'rgba(56, 189, 248, 0.15)';
+          scheduleLiveBanner.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+          scheduleLiveBanner.style.color = '#38bdf8';
+          scheduleLiveText.innerHTML = `🛡️ <strong>MENGAWAL POSISI:</strong> Jam istirahat telah tiba, namun akun masih memiliki posisi terbuka. Bot tetap mengawal hingga posisi ditutup leader sebelum istirahat penuh.`;
+        } else {
+          scheduleLiveBanner.style.background = 'rgba(16, 185, 129, 0.15)';
+          scheduleLiveBanner.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          scheduleLiveBanner.style.color = '#34d399';
+          scheduleLiveText.innerHTML = `🟢 <strong>JADWAL AKTIF:</strong> Bot sedang berjalan normal. Akan beristirahat otomatis pada pukul <strong>${st.startTime} WIB</strong> s/d <strong>${st.endTime} WIB</strong>.`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Gagal memuat data jadwal:', err);
+  }
+}
+
+async function saveSchedule() {
+  if (btnSaveSchedule) {
+    btnSaveSchedule.disabled = true;
+    btnSaveSchedule.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Menyimpan...</span>`;
+    lucide.createIcons({ root: btnSaveSchedule });
+  }
+  try {
+    const payload = {
+      enabled: checkScheduleEnabled ? checkScheduleEnabled.checked : false,
+      startTime: inputScheduleStartTime ? inputScheduleStartTime.value : '10:00',
+      endTime: inputScheduleEndTime ? inputScheduleEndTime.value : '18:30',
+      action: selectScheduleAction ? selectScheduleAction.value : 'FULL_STOP',
+      guardOpenPositions: checkScheduleGuardPositions ? checkScheduleGuardPositions.checked : true,
+    };
+    const res = await apiFetch('/api/schedule', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (scheduleAlertBox) {
+      scheduleAlertBox.style.display = 'block';
+      if (data.success) {
+        scheduleAlertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        scheduleAlertBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        scheduleAlertBox.style.color = '#34d399';
+        scheduleAlertBox.innerHTML = `<strong>✅ BERHASIL DISIMPAN!</strong><br>${data.message}`;
+        await loadScheduleData();
+        setTimeout(() => {
+          closeScheduleModal();
+        }, 1200);
+      } else {
+        scheduleAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        scheduleAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        scheduleAlertBox.style.color = '#f87171';
+        scheduleAlertBox.innerHTML = `<strong>❌ GAGAL:</strong> ${data.message}`;
+      }
+    }
+  } catch (err) {
+    if (scheduleAlertBox) {
+      scheduleAlertBox.style.display = 'block';
+      scheduleAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+      scheduleAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+      scheduleAlertBox.style.color = '#f87171';
+      scheduleAlertBox.innerHTML = `<strong>❌ ERROR:</strong> ${err.message}`;
+    }
+  } finally {
+    if (btnSaveSchedule) {
+      btnSaveSchedule.disabled = false;
+      btnSaveSchedule.innerHTML = `<i data-lucide="check"></i> <span>Simpan Jadwal</span>`;
+      lucide.createIcons({ root: btnSaveSchedule });
+    }
+  }
 }

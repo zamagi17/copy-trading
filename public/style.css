@@ -184,6 +184,11 @@ body {
   box-shadow: 0 0 12px var(--accent-red);
   animation: pulse-dot 0.8s infinite;
 }
+.dot-purple {
+  background: #a855f7;
+  box-shadow: 0 0 12px #a855f7;
+  animation: pulse-dot 2s infinite;
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }

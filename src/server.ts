@@ -372,6 +372,50 @@ app.post('/api/engine/test-order', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/schedule', requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    schedule: engine.getConfig().dailySchedule || {
+      enabled: false,
+      startTime: '10:00',
+      endTime: '18:30',
+      action: 'FULL_STOP',
+      guardOpenPositions: true,
+    },
+    status: engine.getDailyScheduleStatus(),
+  });
+});
+
+app.post('/api/schedule', requireAuth, (req, res) => {
+  try {
+    const { enabled, startTime, endTime, action, guardOpenPositions } = req.body;
+    const currentCfg = engine.getConfig().dailySchedule || {
+      enabled: false,
+      startTime: '10:00',
+      endTime: '18:30',
+      action: 'FULL_STOP',
+      guardOpenPositions: true,
+    };
+    const newSchedule = {
+      enabled: typeof enabled === 'boolean' ? enabled : currentCfg.enabled,
+      startTime: startTime ? String(startTime).trim() : currentCfg.startTime,
+      endTime: endTime ? String(endTime).trim() : currentCfg.endTime,
+      action: (action === 'STANDBY' ? 'STANDBY' : 'FULL_STOP') as 'STANDBY' | 'FULL_STOP',
+      guardOpenPositions: guardOpenPositions !== false,
+    };
+
+    engine.saveConfig({ dailySchedule: newSchedule });
+    res.json({
+      success: true,
+      message: 'Jadwal istirahat harian berhasil disimpan.',
+      schedule: newSchedule,
+      status: engine.getDailyScheduleStatus(),
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 app.post('/api/clear-logs', requireAuth, (req, res) => {
   engine.clearLogs();
   res.json({ success: true, message: 'Log terminal telah dibersihkan.' });

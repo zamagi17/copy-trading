@@ -50,6 +50,24 @@ export interface PollingStatusInfo {
   isWeekendHoliday?: boolean;
 }
 
+export interface DailyScheduleConfig {
+  enabled: boolean;          // true jika jadwal istirahat aktif
+  startTime: string;         // Jam mulai istirahat/mati, format "HH:mm" (WIB), default "10:00"
+  endTime: string;           // Jam bangun/aktif kembali, format "HH:mm" (WIB), default "18:30"
+  action: 'FULL_STOP' | 'STANDBY'; // FULL_STOP = 100% pause (0 kuota proxy), STANDBY = polling lambat 60s
+  guardOpenPositions: boolean; // Tetap kawal jika ada posisi terbuka hingga 0 (default true)
+}
+
+export interface DailyScheduleStatus {
+  enabled: boolean;
+  isSleeping: boolean;
+  startTime: string;
+  endTime: string;
+  action: 'FULL_STOP' | 'STANDBY';
+  resumeInText: string;
+  guardingPositions: boolean;
+}
+
 export interface AppConfig {
   portfolioId: string;
   copyTradeActive: boolean;
@@ -68,6 +86,7 @@ export interface AppConfig {
   pollingIntervalMs: number;
   adaptivePolling?: AdaptivePollingConfig;
   weekendBreak?: WeekendBreakConfig;
+  dailySchedule?: DailyScheduleConfig;
   proxy: ProxyConfig;
   telegram?: TelegramConfig;
   adminPassword?: string;
@@ -161,6 +180,7 @@ export interface EngineStatus {
   lastError: string | null;
   pollingInfo?: PollingStatusInfo;
   weekendBreak?: WeekendBreakStatus;
+  dailySchedule?: DailyScheduleStatus;
 }
 
 export interface ClosedTrade {

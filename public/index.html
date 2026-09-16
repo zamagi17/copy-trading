@@ -70,6 +70,16 @@
           <span id="holidayBadgeText">LIBUR AKHIR PEKAN</span>
         </div>
 
+        <div class="engine-badge badge-sleep" id="scheduleBadge" style="display: none; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.4); color: #c4b5fd; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer;" onclick="openScheduleModal()" title="Klik untuk atur jadwal istirahat">
+          <i data-lucide="moon" style="width: 14px; height: 14px;"></i>
+          <span id="scheduleBadgeText">ISTIRAHAT</span>
+        </div>
+
+        <button class="btn btn-purple" id="btnOpenSchedule" onclick="openScheduleModal()" title="Atur Jadwal Istirahat / Auto Pause Polling" style="background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.45); color: #c4b5fd;">
+          <i data-lucide="calendar-clock" class="btn-icon"></i>
+          <span data-i18n="btn_schedule">Jadwal Istirahat</span>
+        </button>
+
         <button class="btn btn-success" id="btnToggleEngine" onclick="toggleEngine()">
           <i data-lucide="play" class="btn-icon" id="toggleIcon"></i>
           <span id="toggleBtnText">Mulai Copy Trade</span>
@@ -837,6 +847,92 @@
     </div>
   </div>
 
+  <!-- Schedule Sleep / Pause Modal -->
+  <div class="modal-backdrop" id="scheduleModal" style="display: none;">
+    <div class="modal-dialog glass-card" style="max-width: 540px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <i data-lucide="calendar-clock" class="card-icon" style="color: #a78bfa;"></i>
+          <h3 data-i18n="schedule_modal_title">Jadwal Istirahat / Auto Pause Polling</h3>
+        </div>
+        <button class="btn-icon-close" onclick="closeScheduleModal()">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top: 10px;">
+        <p style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 14px;" data-i18n="schedule_intro">
+          Atur jam istirahat otomatis untuk bot agar menghemat kuota proxy 100% di saat Leader sedang tidur atau pasar sepi. Bot akan otomatis aktif kembali saat jam bangun tiba tanpa Anda perlu menyalakan manual.
+        </p>
+
+        <!-- Current Schedule Live Banner -->
+        <div id="scheduleLiveBanner" style="margin-bottom: 16px; padding: 12px; border-radius: 8px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); font-size: 0.85rem; color: #e2e8f0; display: flex; align-items: center; gap: 10px;">
+          <i data-lucide="clock" style="color: #a78bfa; flex-shrink: 0;"></i>
+          <span id="scheduleLiveText">Memuat status jadwal...</span>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field checkbox-field" style="margin-bottom: 12px;">
+            <label class="custom-checkbox">
+              <input type="checkbox" id="checkScheduleEnabled" onchange="toggleScheduleInputs()">
+              <span class="checkmark"></span>
+              <span style="font-weight: 700; color: #a78bfa;" data-i18n="check_schedule_enabled">Aktifkan Jadwal Istirahat Harian</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="scheduleInputsContainer">
+          <div class="form-row">
+            <div class="form-field">
+              <label for="inputScheduleStartTime" data-i18n="label_schedule_start">Jam Mulai Mati / Istirahat (WIB):</label>
+              <input type="time" id="inputScheduleStartTime" value="10:00" style="font-size: 1rem; padding: 8px 12px; font-weight: 600;">
+              <small data-i18n="hint_schedule_start">Waktu bot mulai berhenti polling (misal 10:00 saat Leader tidur).</small>
+            </div>
+
+            <div class="form-field">
+              <label for="inputScheduleEndTime" data-i18n="label_schedule_end">Jam Bangun / Aktif Kembali (WIB):</label>
+              <input type="time" id="inputScheduleEndTime" value="18:30" style="font-size: 1rem; padding: 8px 12px; font-weight: 600;">
+              <small data-i18n="hint_schedule_end">Waktu bot otomatis mulai polling dan memantau transaksi leader lagi.</small>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top: 8px;">
+            <div class="form-field">
+              <label for="selectScheduleAction" data-i18n="label_schedule_action">Mode Selama Jam Istirahat:</label>
+              <select id="selectScheduleAction">
+                <option value="FULL_STOP" selected>🛑 Berhenti Total (Hemat Kuota 100% / 0 Request)</option>
+                <option value="STANDBY">⏱️ Standby Lambat (Polling 60 Detik)</option>
+              </select>
+              <small data-i18n="hint_schedule_action">Pilih "Berhenti Total" untuk konsumsi 0 kuota residential proxy selama jam istirahat.</small>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px;">
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkScheduleGuardPositions" checked>
+                <span class="checkmark"></span>
+                <span style="font-weight: 600; color: #38bdf8;" data-i18n="check_schedule_guard">Tetap Kawal Posisi Jika Masih Ada Posisi Terbuka</span>
+              </label>
+              <small data-i18n="hint_schedule_guard" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                Jika jam istirahat tiba tetapi akun masih punya posisi koin terbuka, bot akan tetap mengawal hingga posisi tertutup oleh Leader. Begitu posisi bersih (0 koin), bot baru masuk ke mode istirahat penuh.
+              </small>
+            </div>
+          </div>
+        </div>
+
+        <div id="scheduleAlertBox" style="display: none; margin-top: 14px; padding: 12px; border-radius: 8px; font-size: 0.8rem;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeScheduleModal()" data-i18n="btn_cancel">Batal</button>
+        <button class="btn btn-primary" id="btnSaveSchedule" onclick="saveSchedule()" style="background: #8b5cf6; border-color: #7c3aed;">
+          <i data-lucide="check"></i> <span data-i18n="btn_save_schedule">Simpan Jadwal</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Login Security Overlay -->
   <div class="login-overlay" id="loginOverlay" style="display: none;">
     <div class="login-box glass-card">
@@ -863,7 +959,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.2"></script>
+  <script src="app.js?v=2.3"></script>
   <script>
     lucide.createIcons();
   </script>
