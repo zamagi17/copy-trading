@@ -1486,13 +1486,19 @@ export class CopyTradeEngine {
 
               const prevTotalLeaderQty = existingStream?.amount || 0;
 
+              let livePrice = ord.avgPrice;
+              try {
+                const fetchedPrice = await binanceClient.getSymbolPrice(ord.symbol);
+                if (fetchedPrice > 0) livePrice = fetchedPrice;
+              } catch {}
+
               if (existingStream) {
                 const oldQty = existingStream.amount;
                 const newQty = oldQty + ord.executedQty;
                 const newEntry = (oldQty * existingStream.entryPrice + ord.executedQty * ord.avgPrice) / newQty;
                 existingStream.amount = newQty;
                 existingStream.entryPrice = newEntry;
-                existingStream.notional = newQty * ord.avgPrice;
+                existingStream.notional = newQty * livePrice;
                 existingStream.updateTime = ord.orderTime;
               } else {
                 if (!this.positionAvgCounts.has(posKey)) {
@@ -1503,11 +1509,11 @@ export class CopyTradeEngine {
                   positionSide: ord.positionSide,
                   amount: ord.executedQty,
                   entryPrice: ord.avgPrice,
-                  markPrice: ord.avgPrice,
+                  markPrice: livePrice,
                   leverage: userPos?.leverage || 10,
                   marginType: 'CROSSED',
                   unrealizedProfit: 0,
-                  notional: ord.executedQty * ord.avgPrice,
+                  notional: ord.executedQty * livePrice,
                   updateTime: ord.orderTime,
                   avgCount: 0,
                 });
@@ -1520,11 +1526,11 @@ export class CopyTradeEngine {
                 positionSide: ord.positionSide,
                 amount: ord.executedQty,
                 entryPrice: ord.avgPrice,
-                markPrice: ord.avgPrice,
+                markPrice: livePrice,
                 leverage: lev,
                 marginType: 'CROSSED',
                 unrealizedProfit: 0,
-                notional: ord.executedQty * ord.avgPrice,
+                notional: ord.executedQty * livePrice,
                 avgCount: this.positionAvgCounts.get(posKey)?.leader || 0,
               };
 
@@ -1532,7 +1538,12 @@ export class CopyTradeEngine {
                 // Posisi akun user sudah aktif -> Eksekusi Averaging Down (Scale In)!
                 const prevQty = prevTotalLeaderQty > 0 ? prevTotalLeaderQty : ord.executedQty;
                 this.log('INFO', `📈 [Latest Records] Leader menambah muatan (Averaging Down): ${ord.symbol} ${ord.positionSide} (+${ord.executedQty} @ $${ord.avgPrice})`);
-                await this.handleAveraging(mockPos, ord.executedQty, prevQty, userBalance, userPos);
+                const avgRes = await this.handleAveraging(mockPos, ord.executedQty, prevQty, userBalance, userPos);
+                if (avgRes && userPos) {
+                  userPositionsMap.set(posKey, userPos);
+                  const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === posKey);
+                  if (uIdx !== -1) userPositions[uIdx] = { ...userPos };
+                }
                 const counts = this.positionAvgCounts.get(posKey);
                 const updatedStream = this.streamLeaderPositions.get(posKey);
                 if (updatedStream && counts) {
@@ -1546,7 +1557,13 @@ export class CopyTradeEngine {
                   this.positionAvgCounts.set(posKey, counts);
                   existingStream.avgCount = counts.leader;
                 }
-                await this.handleNewPosition(mockPos, userBalance, undefined);
+                const newPos = await this.handleNewPosition(mockPos, userBalance, undefined);
+                if (newPos) {
+                  userPositionsMap.set(posKey, newPos);
+                  const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === posKey);
+                  if (uIdx !== -1) userPositions[uIdx] = newPos;
+                  else userPositions.push(newPos);
+                }
               }
             } else if (ord.action === 'CLOSE') {
               const key = `${ord.symbol}_${ord.positionSide}`;
@@ -1692,6 +1709,10 @@ export class CopyTradeEngine {
                     const remainingQty = Math.max(0, userCurrentQty - actualCloseQty);
                     userPos.positionAmt = ord.positionSide === 'LONG' ? remainingQty : -remainingQty;
                     userPos.notional = remainingQty * (ord.avgPrice || userPos.entryPrice || 0);
+                    userPos.margin = (remainingQty * (userPos.entryPrice || ord.avgPrice || 0)) / Math.max(1, userPos.leverage || 10);
+                    userPositionsMap.set(key, userPos);
+                    const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === key);
+                    if (uIdx !== -1) userPositions[uIdx] = { ...userPos };
                     this.recordClosedTrade({
                       symbol: ord.symbol,
                       positionSide: ord.positionSide,
@@ -1804,7 +1825,13 @@ export class CopyTradeEngine {
             if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
               this.abortDailySchedule(`Buka posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `Entry: $${leaderPos.entryPrice}, Vol: ${leaderPos.amount}`);
             }
-            await this.handleNewPosition(leaderPos, userBalance, userPositionsMap.get(key));
+            const newPos = await this.handleNewPosition(leaderPos, userBalance, userPositionsMap.get(key));
+            if (newPos) {
+              userPositionsMap.set(key, newPos);
+              const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === key);
+              if (uIdx !== -1) userPositions[uIdx] = newPos;
+              else userPositions.push(newPos);
+            }
           } else {
             // POSISI SUDAH ADA SEBELUMNYA: Cek apakah leader menambah posisi (Averaging) atau partial close
             const deltaAmount = leaderPos.amount - prevLeaderPos.amount;
@@ -1820,7 +1847,14 @@ export class CopyTradeEngine {
               if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
                 this.abortDailySchedule(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
               }
-              await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPositionsMap.get(key));
+              const avgRes = await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPositionsMap.get(key));
+              if (avgRes) {
+                const uPos = userPositionsMap.get(key);
+                if (uPos) {
+                  const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === key);
+                  if (uIdx !== -1) userPositions[uIdx] = { ...uPos };
+                }
+              }
             } else if (deltaAmount < 0 && Math.abs(deltaPct) >= 0.02) {
               // Leader Partial Close
               this.log('INFO', `📉 LEADER PARTIAL CLOSE: ${leaderPos.symbol} ${leaderPos.positionSide} (-${Math.abs(deltaAmount).toFixed(4)} koin)`);
@@ -1961,7 +1995,7 @@ export class CopyTradeEngine {
     }
   }
 
-  private async handleNewPosition(leaderPos: LeadPosition, userBalance: number, existingUserPos?: UserPosition) {
+  private async handleNewPosition(leaderPos: LeadPosition, userBalance: number, existingUserPos?: UserPosition): Promise<UserPosition | null> {
     // 0. Proteksi Mode Libur Akhir Pekan (Waktu China CST UTC+8)
     const isAveragingDown = Boolean(existingUserPos && Math.abs(existingUserPos.positionAmt) > 0);
     const weekendStatus = this.getWeekendBreakStatus();
@@ -1997,13 +2031,13 @@ export class CopyTradeEngine {
         this.recentlyClosedCoins.delete(leaderPos.symbol);
       } else {
         this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu China: ${weekendStatus.cstTimeStr}) dan akun belum memiliki posisi terbuka pada koin ini.`);
-        return;
+        return null;
       }
     }
 
     if (!this.config.paperTrading && !binanceClient.isConfigured()) {
       this.log('WARN', 'Lewati eksekusi: API Key Binance belum dikonfigurasi di dashboard.');
-      return;
+      return null;
     }
 
     // Validasi Slippage Guard
@@ -2011,14 +2045,14 @@ export class CopyTradeEngine {
       const slippage = Math.abs((leaderPos.markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
       if (slippage > this.config.maxSlippagePct) {
         this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan order agar tidak mengejar harga buruk!`);
-        return;
+        return null;
       }
     }
 
     // Hitung kuantitas target
     const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
     const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
-    if (markPrice <= 0) return;
+    if (markPrice <= 0) return null;
 
     let targetQty = 0;
 
@@ -2059,7 +2093,7 @@ export class CopyTradeEngine {
         targetQty = minQtyForNotional;
       } else {
         this.log('WARN', `Kuantitas order ${leaderPos.symbol} (${targetQty}) di bawah batas minimum Binance ($${filter.minNotional} USDT / ${filter.minQty}) dan menaikkannya melanggar batas margin aman ($${maxAllowedMargin.toFixed(2)} USDT). Order dibatalkan.`);
-        return;
+        return null;
       }
     }
 
@@ -2068,7 +2102,7 @@ export class CopyTradeEngine {
     // Proteksi duplikasi order: Jika akun Anda sudah memiliki posisi terbuka pada simbol & arah ini, lewati pembukaan ganda
     if (existingUserPos && Math.abs(existingUserPos.positionAmt) > 0) {
       this.log('INFO', `ℹ️ Posisi ${leaderPos.symbol} ${leaderPos.positionSide} sudah terbuka aktif di akun Anda. Menghubungkan tracking posisi tanpa membuka order baru.`);
-      return;
+      return existingUserPos;
     }
 
     // JIKA MODE SIMULASI (PAPER TRADING) AKTIF: Eksekusi secara virtual tanpa API Key & tanpa modal riil
@@ -2108,7 +2142,7 @@ export class CopyTradeEngine {
         `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
-      return;
+      return virtualPos;
     }
 
     try {
@@ -2138,6 +2172,21 @@ export class CopyTradeEngine {
         `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
+
+      const newUserPos: UserPosition = {
+        symbol: leaderPos.symbol,
+        positionSide: leaderPos.positionSide,
+        positionAmt: leaderPos.positionSide === 'LONG' ? targetQty : -targetQty,
+        entryPrice: markPrice,
+        markPrice: markPrice,
+        unRealizedProfit: 0,
+        leverage: leaderPos.leverage || 10,
+        marginType: leaderPos.marginType || 'CROSSED',
+        notional: targetQty * markPrice,
+        margin: estMargin,
+        avgCount: 0,
+      };
+      return newUserPos;
     } catch (e: any) {
       const errMsg = e.response?.data?.msg || e.message;
       this.log('ERROR', `❌ Gagal eksekusi order ${leaderPos.symbol}: ${errMsg}`);
@@ -2148,6 +2197,7 @@ export class CopyTradeEngine {
         `❌ Error: <code>${errMsg}</code>\n` +
         `💡 Tips: Periksa saldo margin USDT atau batasan akun di Binance Anda.`
       );
+      return null;
     }
   }
 
@@ -2157,12 +2207,12 @@ export class CopyTradeEngine {
     prevTotalLeaderQty: number,
     userBalance: number,
     existingUserPos?: UserPosition
-  ) {
-    if (!this.config.paperTrading && !binanceClient.isConfigured()) return;
-    if (!existingUserPos) return;
+  ): Promise<{ addedQty: number; newTotalQty: number; newEntryPrice: number } | null> {
+    if (!this.config.paperTrading && !binanceClient.isConfigured()) return null;
+    if (!existingUserPos) return null;
 
     const userCurrentQty = Math.abs(existingUserPos.positionAmt);
-    if (userCurrentQty <= 0) return;
+    if (userCurrentQty <= 0) return null;
 
     // Hitung penambahan proporsional
     const addRatio = prevTotalLeaderQty > 0 ? (deltaAmount / prevTotalLeaderQty) : 1;
@@ -2176,7 +2226,7 @@ export class CopyTradeEngine {
       const slippage = Math.abs((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
       if (slippage > this.config.maxSlippagePct) {
         this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada averaging ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan averaging agar tidak mengejar harga buruk!`);
-        return;
+        return null;
       }
     }
 
@@ -2188,7 +2238,7 @@ export class CopyTradeEngine {
       addQty = Math.max(0, (maxNotional - userCurrentQty * markPrice) / markPrice);
       if (addQty <= 0) {
         this.log('WARN', `🛡️ Safety Cap Tercapai untuk ${leaderPos.symbol} (Maks Margin: $${this.config.maxModalPerCoin} USDT). Tidak menambah posisi lagi.`);
-        return;
+        return null;
       }
     }
 
@@ -2205,7 +2255,7 @@ export class CopyTradeEngine {
         addQty = minQtyForNotional;
       } else {
         this.log('WARN', `⚠️ Kuantitas averaging ${leaderPos.symbol} (${addQty}) di bawah batas minimum Binance ($${filter.minNotional} USDT / ${filter.minQty}) dan menaikkannya melanggar Safety Cap. Averaging dilewati.`);
-        return;
+        return null;
       }
     }
 
@@ -2240,7 +2290,7 @@ export class CopyTradeEngine {
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
-      return;
+      return { addedQty: addQty, newTotalQty: newQty, newEntryPrice: newEntry };
     }
 
     try {
@@ -2257,6 +2307,17 @@ export class CopyTradeEngine {
       this.positionAvgCounts.set(posKey, counts);
       this.saveVirtualState();
 
+      // MUTASI MEMORY STATE USER POSISI AGAR TIDAK MENGGUNAKAN KUANTITAS LAMA
+      const oldQty = Math.abs(existingUserPos.positionAmt);
+      const newQty = oldQty + addQty;
+      const newEntry = (oldQty * existingUserPos.entryPrice + addQty * markPrice) / newQty;
+      const lev = Math.max(1, existingUserPos.leverage || 10);
+      existingUserPos.positionAmt = leaderPos.positionSide === 'LONG' ? newQty : -newQty;
+      existingUserPos.entryPrice = newEntry;
+      existingUserPos.notional = newQty * markPrice;
+      existingUserPos.margin = (newQty * newEntry) / lev;
+      existingUserPos.avgCount = nextUserCount;
+
       this.log('SUCCESS', `✅ Berhasil menambah posisi (Averaging Down ke-${nextUserCount}x) ${leaderPos.symbol} (+${addQty})`);
       this.sendTelegram(
         `➕ <b>ORDER AVERAGING DOWN [🟢 LIVE FUTURES]</b>\n\n` +
@@ -2265,10 +2326,12 @@ export class CopyTradeEngine {
         `🔄 Averaging Down: <b>ke-${counts.user}x (${counts.user + 1} Layer)</b>\n` +
         `💵 Harga Pasar: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
-        `📦 Tambahan Volume: <b>+${addQty}</b>\n` +
+        `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
+        `📦 Tambahan Volume: <b>+${addQty}</b> (Total: ${newQty.toFixed(4)})\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
+      return { addedQty: addQty, newTotalQty: newQty, newEntryPrice: newEntry };
     } catch (e: any) {
       const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
       const counts = this.positionAvgCounts.get(posKey) || { leader: 0, user: 0 };
@@ -2283,6 +2346,7 @@ export class CopyTradeEngine {
         `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
         `❌ Error: <code>${errMsg}</code>`
       );
+      return null;
     }
   }
 

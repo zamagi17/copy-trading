@@ -366,6 +366,21 @@ export class BinanceFuturesClient {
           await this.syncTime();
           continue;
         }
+        if (err.response?.data?.code === -4061 && attempt === 1) {
+          // -4061: Order's position side does not match user's setting
+          // Sinkronisasi ulang mode Hedge vs One-Way secara real-time
+          this.isDualSidePosition = null;
+          this.lastDualSideFetch = 0;
+          const isDualNow = await this.getDualSidePosition();
+          if (isDualNow) {
+            params.positionSide = positionSide && positionSide !== 'BOTH' ? positionSide : (side === 'BUY' ? 'LONG' : 'SHORT');
+            delete params.reduceOnly;
+          } else {
+            delete params.positionSide;
+            if (reduceOnly) params.reduceOnly = 'true';
+          }
+          continue;
+        }
         throw err;
       }
     }
@@ -385,8 +400,23 @@ export class BinanceFuturesClient {
       } catch (err: any) {
         lastErr = err;
         const msg = String(err.response?.data?.msg || err.message || '');
-        // Jika bursa menyatakan posisi sudah 0 atau reduce-only terpenuhi, anggap sukses tertutup
-        if (msg.includes('ReduceOnly') || msg.includes('position is zero') || msg.includes('Position does not exist')) {
+        const code = err.response?.data?.code;
+
+        // Jika bursa menyatakan posisi sudah 0 atau reduce-only terpenuhi, periksa posisi riil
+        if (msg.includes('ReduceOnly') || msg.includes('position is zero') || msg.includes('Position does not exist') || code === -2022) {
+          try {
+            const livePositions = await this.getOpenPositions();
+            const livePos = livePositions.find(p => p.symbol === symbol.toUpperCase() && (p.positionSide === currentSide || p.positionSide === 'BOTH'));
+            if (!livePos || Math.abs(livePos.positionAmt) <= 0) {
+              return { status: 'ALREADY_CLOSED', msg };
+            }
+            // Sisa koin masih ada karena perbedaan presisi lot/dust! Tutup dengan volume riil saat ini
+            const filter = await this.getSymbolFilter(symbol);
+            const liveQty = this.roundQuantity(Math.abs(livePos.positionAmt), filter.stepSize);
+            if (liveQty > 0) {
+              return await this.placeMarketOrder(symbol, side, liveQty, true, currentSide);
+            }
+          } catch {}
           return { status: 'ALREADY_CLOSED', msg };
         }
         if (attempt < maxRetries) {
