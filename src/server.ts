@@ -384,6 +384,20 @@ app.post('/api/engine/test-order', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/positions/sync-avg-down', requireAuth, async (req, res) => {
+  try {
+    const { symbol, positionSide } = req.body;
+    if (!symbol || !positionSide) {
+      res.status(400).json({ success: false, message: 'Symbol dan positionSide wajib diisi!' });
+      return;
+    }
+    const result = await engine.syncAveragingDown(symbol, positionSide);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.get('/api/schedule', requireAuth, (req, res) => {
   res.json({
     success: true,

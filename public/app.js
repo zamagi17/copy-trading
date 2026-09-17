@@ -1700,9 +1700,13 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
     } else {
       const lBadge = leaderAvg === 0 ? 'badge-gray' : (leaderAvg === 1 ? 'badge-yellow' : 'badge-purple');
       const uBadge = userAvg === 0 ? 'badge-gray' : (userAvg === 1 ? 'badge-yellow' : 'badge-purple');
+      const syncBtn = (up && leaderAvg > userAvg)
+        ? `<br/><button class="btn-sync-avg" onclick="syncAvgDown('${symbol}', '${side}')" title="${currentLang === 'en' ? 'Catch up missing avg down layer!' : 'Ketinggalan layer! Klik untuk averaging down susulan'}">⚡ Sync Avg</button>`
+        : '';
       avgDownDisplay = `
         <small class="text-dim">L:</small> <span class="badge ${lBadge}" title="Leader: ${leaderAvg}x avg down (${leaderAvg + 1} layer)">${leaderAvg > 0 ? `+${leaderAvg}x` : '0x'}</span><br/>
         <small class="text-dim">U:</small> <span class="badge ${uBadge}" title="Akun Anda: ${userAvg}x avg down (${userAvg + 1} layer)">${userAvg > 0 ? `+${userAvg}x` : '0x'}</span>
+        ${syncBtn}
       `;
     }
 
@@ -2893,3 +2897,27 @@ async function triggerManualDailySnapshot() {
     lucide.createIcons({ root: btnTakeManualSnapshot });
   }
 }
+
+window.syncAvgDown = async function(symbol, side) {
+  const confirmMsg = currentLang === 'en'
+    ? `Leader has averaged down on ${symbol} (${side}) but your account missed it.\n\nExecute catch-up averaging down order now?`
+    : `Leader telah melakukan averaging down pada ${symbol} (${side}) tetapi akun Anda tertinggal (0x).\n\nEksekusi order averaging down susulan sekarang agar proporsional dengan leader?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch('/api/positions/sync-avg-down', {
+      method: 'POST',
+      body: JSON.stringify({ symbol, positionSide: side })
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(data.message);
+      if (typeof fetchStatus === 'function') fetchStatus();
+    } else {
+      alert((currentLang === 'en' ? 'Failed: ' : 'Gagal: ') + (data.message || 'Error'));
+    }
+  } catch (err) {
+    alert((currentLang === 'en' ? 'Error: ' : 'Kesalahan: ') + (err.message || 'Error'));
+  }
+};

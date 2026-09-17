@@ -405,6 +405,27 @@ body {
 .badge-red { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
 .badge-gray { background: rgba(255, 255, 255, 0.08); color: var(--text-dim); border: 1px solid rgba(255, 255, 255, 0.12); }
 
+.btn-sync-avg {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.btn-sync-avg:hover {
+  background: rgba(245, 158, 11, 0.35);
+  border-color: #fbbf24;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
 /* Statistics Grid */
 .stats-grid {
   display: grid;
