@@ -1565,6 +1565,8 @@ export class CopyTradeEngine {
 
                 // Harga mark/eksekusi untuk valuasi nilai notional ($5 USDT rule Binance Futures)
                 const evalPrice = ord.avgPrice > 0 ? ord.avgPrice : (userPos.markPrice || userPos.entryPrice || 1);
+                const minCloseQty = binanceClient.roundQuantity(Math.ceil((filter.minNotional * 1.05) / evalPrice / filter.stepSize) * filter.stepSize, filter.stepSize);
+
                 const remainingQty = Math.max(0, userCurrentQty - targetCloseQty);
                 const remainingNotional = remainingQty * evalPrice;
                 const closeNotional = targetCloseQty * evalPrice;
@@ -1574,11 +1576,20 @@ export class CopyTradeEngine {
 
                 // POIN 1: Proteksi Dust / Koin Receh (< $5 USDT rule Binance Futures)
                 // - Jika sisa koin setelah tutup bernilai < $5 USDT, tutup penuh 100% agar tidak jadi koin zombie
-                // - Jika volume yang hendak ditutup bernilai < $5 USDT, tutup penuh 100% agar tidak di-reject Binance
-                const isDustRemaining = remainingNotional < 5.0 || remainingQty < filter.minQty;
-                const isCloseTooSmall = closeNotional < 5.0 && (userCurrentQty * evalPrice) < 10.0;
+                // - Jika volume yang hendak ditutup bernilai < $5 USDT, tutup penuh jika sisa koin receh, atau naikkan ke minCloseQty agar tidak di-reject Binance (-4164)
+                const isDustRemaining = remainingNotional < filter.minNotional || remainingQty < filter.minQty;
+                const isCloseTooSmall = closeNotional < filter.minNotional;
 
-                const isFullClose = isLeaderFullClose || isDustRemaining || isCloseTooSmall || targetCloseQty >= userCurrentQty || (userCurrentQty - targetCloseQty) < filter.minQty;
+                let isFullClose = isLeaderFullClose || isDustRemaining || targetCloseQty >= userCurrentQty || (userCurrentQty - targetCloseQty) < filter.minQty;
+
+                if (!isFullClose && isCloseTooSmall) {
+                  if ((userCurrentQty - minCloseQty) * evalPrice < filter.minNotional || userCurrentQty <= minCloseQty) {
+                    isFullClose = true;
+                  } else {
+                    targetCloseQty = minCloseQty;
+                  }
+                }
+
                 const actualCloseQty = isFullClose ? binanceClient.roundQuantity(userCurrentQty, filter.stepSize) : targetCloseQty;
 
                 // Jika partial close di bawah batas minimal lot dan bukan full close, lewati
@@ -2298,14 +2309,23 @@ export class CopyTradeEngine {
 
     const posKey = `${leaderPos.symbol}_${existingUserPos.positionSide}`;
     const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
+    const minCloseQty = binanceClient.roundQuantity(Math.ceil((filter.minNotional * 1.05) / exitPrice / filter.stepSize) * filter.stepSize, filter.stepSize);
     let closeQty = binanceClient.roundQuantity(userCurrentQty * closeRatio, filter.stepSize);
 
     // Proteksi Dust (< $5 USDT) & Smart Full Close (Leader tutup >= 90%)
     const remainingQty = Math.max(0, userCurrentQty - closeQty);
     const remainingNotional = remainingQty * exitPrice;
-    const isDustOrFull = closeRatio >= 0.90 || remainingNotional < 5.0 || remainingQty < filter.minQty;
+    const isDustOrFull = closeRatio >= 0.90 || remainingNotional < filter.minNotional || remainingQty < filter.minQty;
+
     if (isDustOrFull) {
       closeQty = binanceClient.roundQuantity(userCurrentQty, filter.stepSize);
+    } else if (closeQty * exitPrice < filter.minNotional) {
+      // Jika partial close di bawah $5 USDT, naikkan ke minCloseQty jika sisa masih cukup, atau tutup 100% jika sisa receh
+      if ((userCurrentQty - minCloseQty) * exitPrice < filter.minNotional || userCurrentQty <= minCloseQty) {
+        closeQty = binanceClient.roundQuantity(userCurrentQty, filter.stepSize);
+      } else {
+        closeQty = minCloseQty;
+      }
     }
 
     if (closeQty < filter.minQty) return;

@@ -218,13 +218,13 @@ export class BinanceFuturesClient {
         let minNotional = 5.0;
 
         for (const f of s.filters || []) {
-          if (f.filterType === 'LOT_SIZE') {
-            stepSize = parseFloat(f.stepSize) || 0.001;
-            minQty = parseFloat(f.minQty) || 0.001;
+          if (f.filterType === 'LOT_SIZE' || f.filterType === 'MARKET_LOT_SIZE') {
+            stepSize = parseFloat(f.stepSize) || stepSize;
+            minQty = parseFloat(f.minQty) || minQty;
           } else if (f.filterType === 'PRICE_FILTER') {
             tickSize = parseFloat(f.tickSize) || 0.01;
           } else if (f.filterType === 'MIN_NOTIONAL') {
-            minNotional = parseFloat(f.notional) || 5.0;
+            minNotional = parseFloat(f.notional ?? f.minNotional) || 5.0;
           }
         }
 

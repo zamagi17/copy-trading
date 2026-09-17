@@ -31,7 +31,22 @@ export class TelegramService {
       );
       return Boolean(res.data?.ok);
     } catch (err: any) {
-      console.error('[TelegramService] Gagal kirim notifikasi:', err.response?.data?.description || err.message);
+      console.error('[TelegramService] Gagal kirim notifikasi HTML:', err.response?.data?.description || err.message);
+      // Fallback: Jika Telegram gagal parse HTML entity (misal pesan error bursa mengandung tag/simbol < >), kirim sebagai plain text
+      try {
+        const plainText = text.replace(/<[^>]+>/g, '');
+        const url = `https://api.telegram.org/bot${cfg.botToken}/sendMessage`;
+        const resFallback = await axios.post(
+          url,
+          {
+            chat_id: cfg.chatId,
+            text: plainText,
+            disable_web_page_preview: true,
+          },
+          { timeout: 8000 }
+        );
+        return Boolean(resFallback.data?.ok);
+      } catch {}
       return false;
     }
   }
