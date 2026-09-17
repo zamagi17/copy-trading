@@ -321,10 +321,10 @@ export class BinanceFuturesClient {
           await this.syncTime();
           continue;
         }
-        return false;
+        return this.isDualSidePosition !== null ? this.isDualSidePosition : false;
       }
     }
-    return false;
+    return this.isDualSidePosition !== null ? this.isDualSidePosition : false;
   }
 
   /**

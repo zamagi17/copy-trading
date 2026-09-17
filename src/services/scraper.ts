@@ -152,7 +152,7 @@ export class CopyTradeScraper {
 
       const root = res.data;
       if (!root || (root.code && root.code !== '000000')) {
-        return [];
+        throw new Error(`Binance API error: code ${root?.code || 'EMPTY_RESPONSE'}`);
       }
 
       let dataArr: any[] = [];
@@ -230,7 +230,7 @@ export class CopyTradeScraper {
 
       const root = res.data;
       if (!root || (root.code && root.code !== '000000') || !root.data) {
-        return [];
+        throw new Error(`Binance API order-history error: code ${root?.code || 'EMPTY_RESPONSE'}`);
       }
 
       const list = root.data.list || [];
@@ -244,6 +244,7 @@ export class CopyTradeScraper {
         const rawPosSide = String(item.positionSide || 'BOTH').toUpperCase();
         const executedQty = Number(item.executedQty ?? item.qty ?? 0);
         const avgPrice = Number(item.avgPrice ?? item.price ?? 0);
+        if (executedQty <= 0 || avgPrice <= 0) continue;
         const totalPnl = Number(item.totalPnl ?? item.realizedPnl ?? 0);
         // BEST PRACTICE: Prioritaskan orderUpdateTime (waktu order match / fill di bursa)
         // sebagai patokan utama eksekusi copy trade agar limit order yang baru match tidak terlewat.
@@ -373,6 +374,10 @@ export class CopyTradeScraper {
       } catch {
         // Jika gagal, gunakan data lama yang ada di cache
       }
+    }
+
+    if (!data) {
+      throw new Error(`Gagal mengambil data detail portofolio leader ${id} dari Binance.`);
     }
 
     const nickname = data?.nickname || data?.leadPortfolioName || `Leader ${id}`;

@@ -1594,20 +1594,22 @@ export class CopyTradeEngine {
                   : 0;
 
                 if (isFullClose) {
-                  this.streamLeaderPositions.delete(key);
-                  this.positionAvgCounts.delete(key);
-                  this.saveVirtualState();
                   this.log('INFO', `🎯 [Latest Records] Leader MENUTUP ${ord.positionSide} ${ord.symbol} @ $${ord.avgPrice} (Tutup Penuh)`);
                   let closeSucceeded = false;
                   if (this.config.paperTrading) {
                     this.virtualWalletBalance += pnl;
                     this.virtualPositions.delete(key);
+                    this.streamLeaderPositions.delete(key);
+                    this.positionAvgCounts.delete(key);
                     this.saveVirtualState();
                     this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi ${ord.symbol} ${ord.positionSide} ditutup penuh sinkron! PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (Saldo virtual: $${this.virtualWalletBalance.toFixed(2)} USDT)`);
                     closeSucceeded = true;
                   } else {
                     try {
                       await binanceClient.closePosition(ord.symbol, ord.positionSide, actualCloseQty);
+                      this.streamLeaderPositions.delete(key);
+                      this.positionAvgCounts.delete(key);
+                      this.saveVirtualState();
                       this.log('SUCCESS', `✅ Posisi ${ord.symbol} ${ord.positionSide} akun Anda berhasil ditutup penuh.`);
                       closeSucceeded = true;
                     } catch (e: any) {
@@ -1797,7 +1799,7 @@ export class CopyTradeEngine {
             const deltaAmount = leaderPos.amount - prevLeaderPos.amount;
             const deltaPct = prevLeaderPos.amount > 0 ? deltaAmount / prevLeaderPos.amount : 0;
 
-            if (deltaAmount > 0 && deltaPct >= 0.04) {
+            if (deltaAmount > 0 && deltaPct >= 0.02) {
               // Leader Menambah Posisi (Averaging Down / Scaling In)
               this.log('INFO', `📈 LEADER MENAMBAH POSISI: ${leaderPos.symbol} ${leaderPos.positionSide} (+${deltaAmount.toFixed(4)} koin, +${(deltaPct * 100).toFixed(1)}%)`);
               if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
@@ -1808,7 +1810,7 @@ export class CopyTradeEngine {
                 this.abortDailySchedule(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
               }
               await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPositionsMap.get(key));
-            } else if (deltaAmount < 0 && Math.abs(deltaPct) >= 0.04) {
+            } else if (deltaAmount < 0 && Math.abs(deltaPct) >= 0.02) {
               // Leader Partial Close
               this.log('INFO', `📉 LEADER PARTIAL CLOSE: ${leaderPos.symbol} ${leaderPos.positionSide} (-${Math.abs(deltaAmount).toFixed(4)} koin)`);
               if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
@@ -1862,32 +1864,47 @@ export class CopyTradeEngine {
             const slQty = binanceClient.roundQuantity(Math.abs(up.positionAmt), filter.stepSize);
             const slPnl = up.unRealizedProfit;
 
+            const posKey = `${up.symbol}_${side}`;
+            let slClosed = false;
+
             if (this.config.paperTrading) {
-              const posKey = `${up.symbol}_${side}`;
               this.virtualWalletBalance += slPnl;
               this.virtualPositions.delete(posKey);
+              this.streamLeaderPositions.delete(posKey);
+              this.positionAvgCounts.delete(posKey);
               this.saveVirtualState();
               this.log('SUCCESS', `🧪 [MODE SIMULASI] Posisi virtual ${up.symbol} ditutup via Emergency Stop Loss! PnL: -$${Math.abs(slPnl).toFixed(2)} USDT`);
+              slClosed = true;
             } else {
               try {
                 await binanceClient.closePosition(up.symbol, side, slQty);
+                this.streamLeaderPositions.delete(posKey);
+                this.positionAvgCounts.delete(posKey);
+                this.saveVirtualState();
                 this.log('SUCCESS', `✅ Berhasil menutup darurat ${up.symbol}`);
+                slClosed = true;
               } catch (e: any) {
                 this.log('ERROR', `Gagal menutup darurat ${up.symbol}: ${e.message}`);
               }
             }
 
-            this.recordClosedTrade({
-              symbol: up.symbol,
-              positionSide: side,
-              action: 'EMERGENCY_SL',
-              qty: slQty,
-              entryPrice: up.entryPrice,
-              closePrice: up.markPrice || up.entryPrice,
-              realizedPnl: Number(slPnl.toFixed(2)),
-              pnlPct: Number((-lossPct).toFixed(2)),
-              isPaper: this.config.paperTrading,
-            });
+            if (slClosed) {
+              userPositionsMap.delete(posKey);
+              const uIdx = userPositions.findIndex((u) => `${u.symbol}_${u.positionSide}` === posKey);
+              if (uIdx !== -1) userPositions.splice(uIdx, 1);
+
+              this.recordClosedTrade({
+                symbol: up.symbol,
+                positionSide: side,
+                action: 'EMERGENCY_SL',
+                qty: slQty,
+                entryPrice: up.entryPrice,
+                closePrice: up.markPrice || up.entryPrice,
+                realizedPnl: Number(slPnl.toFixed(2)),
+                pnlPct: Number((-lossPct).toFixed(2)),
+                isPaper: this.config.paperTrading,
+              });
+            }
           }
         }
       }
@@ -2016,10 +2033,23 @@ export class CopyTradeEngine {
     // Normalisasi presisi lot
     targetQty = binanceClient.roundQuantity(targetQty, filter.stepSize);
 
-    // Validasi minimal notional ($5 USDT) dan minimal kuantitas
-    if (targetQty < filter.minQty || targetQty * markPrice < filter.minNotional) {
-      this.log('WARN', `Kuantitas order ${leaderPos.symbol} (${targetQty}) di bawah batas minimum Binance ($${filter.minNotional} USDT / ${filter.minQty}). Order dibatalkan.`);
-      return;
+    // Proteksi minQty & minNotional ($5 USDT rule Binance Futures)
+    if (targetQty < filter.minQty) {
+      targetQty = filter.minQty;
+    }
+    if (targetQty * markPrice < filter.minNotional) {
+      const minQtyForNotional = binanceClient.roundQuantity(Math.ceil((filter.minNotional * 1.05) / markPrice / filter.stepSize) * filter.stepSize, filter.stepSize);
+      const testMargin = (minQtyForNotional * markPrice) / lev;
+      const maxAllowedMargin = this.config.maxModalPerCoin > 0
+        ? this.config.maxModalPerCoin
+        : (userBalance > 0 ? userBalance * 0.5 : 50);
+
+      if (testMargin <= maxAllowedMargin) {
+        targetQty = minQtyForNotional;
+      } else {
+        this.log('WARN', `Kuantitas order ${leaderPos.symbol} (${targetQty}) di bawah batas minimum Binance ($${filter.minNotional} USDT / ${filter.minQty}) dan menaikkannya melanggar batas margin aman ($${maxAllowedMargin.toFixed(2)} USDT). Order dibatalkan.`);
+        return;
+      }
     }
 
     const side: 'BUY' | 'SELL' = leaderPos.positionSide === 'LONG' ? 'BUY' : 'SELL';
@@ -2266,14 +2296,16 @@ export class CopyTradeEngine {
       exitPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : (existingUserPos.markPrice > 0 ? existingUserPos.markPrice : existingUserPos.entryPrice);
     }
 
+    const posKey = `${leaderPos.symbol}_${existingUserPos.positionSide}`;
     const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
     let closeQty = binanceClient.roundQuantity(userCurrentQty * closeRatio, filter.stepSize);
 
     // Proteksi Dust (< $5 USDT) & Smart Full Close (Leader tutup >= 90%)
     const remainingQty = Math.max(0, userCurrentQty - closeQty);
     const remainingNotional = remainingQty * exitPrice;
-    if (closeRatio >= 0.90 || remainingNotional < 5.0 || remainingQty < filter.minQty) {
-      closeQty = userCurrentQty;
+    const isDustOrFull = closeRatio >= 0.90 || remainingNotional < 5.0 || remainingQty < filter.minQty;
+    if (isDustOrFull) {
+      closeQty = binanceClient.roundQuantity(userCurrentQty, filter.stepSize);
     }
 
     if (closeQty < filter.minQty) return;
@@ -2287,12 +2319,13 @@ export class CopyTradeEngine {
 
     let partialCloseSucceeded = false;
     if (this.config.paperTrading) {
-      const posKey = `${leaderPos.symbol}_${existingUserPos.positionSide}`;
       const oldQty = Math.abs(existingUserPos.positionAmt);
       const remainingQty = Math.max(0, oldQty - closeQty);
       this.virtualWalletBalance += pnl;
-      if (remainingQty <= 0) {
+      if (remainingQty <= 0 || closeQty >= oldQty) {
         this.virtualPositions.delete(posKey);
+        this.positionAvgCounts.delete(posKey);
+        this.streamLeaderPositions.delete(posKey);
       } else {
         existingUserPos.positionAmt = existingUserPos.positionSide === 'LONG' ? remainingQty : -remainingQty;
         existingUserPos.notional = remainingQty * exitPrice;
@@ -2304,9 +2337,16 @@ export class CopyTradeEngine {
       partialCloseSucceeded = true;
     } else {
       try {
-        const side: 'LONG' | 'SHORT' = existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT';
+        const side: 'LONG' | 'SHORT' = (existingUserPos.positionSide === 'LONG' || existingUserPos.positionSide === 'SHORT')
+          ? existingUserPos.positionSide
+          : (existingUserPos.positionAmt > 0 ? 'LONG' : 'SHORT');
         this.log('INFO', `✂️ Menutup parsial ${leaderPos.symbol} (${(closeRatio * 100).toFixed(1)}%, Vol: ${closeQty})...`);
         await binanceClient.closePosition(leaderPos.symbol, side, closeQty);
+        if (closeQty >= userCurrentQty) {
+          this.positionAvgCounts.delete(posKey);
+          this.streamLeaderPositions.delete(posKey);
+          this.saveVirtualState();
+        }
         this.log('SUCCESS', `✅ Sukses partial close ${leaderPos.symbol} (${closeQty})`);
         partialCloseSucceeded = true;
       } catch (e: any) {
@@ -2327,7 +2367,7 @@ export class CopyTradeEngine {
       this.recordClosedTrade({
         symbol: leaderPos.symbol,
         positionSide: existingUserPos.positionSide as any,
-        action: 'PARTIAL_CLOSE',
+        action: (closeQty >= userCurrentQty) ? 'FULL_CLOSE' : 'PARTIAL_CLOSE',
         qty: closeQty,
         entryPrice: existingUserPos.entryPrice,
         closePrice: exitPrice,
@@ -2426,6 +2466,8 @@ export class CopyTradeEngine {
         });
       }
       this.virtualPositions.clear();
+      this.positionAvgCounts.clear();
+      this.streamLeaderPositions.clear();
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Berhasil menutup ${count} posisi virtual secara darurat!`);
       return `Berhasil menutup ${count} posisi virtual.`;
@@ -2438,26 +2480,44 @@ export class CopyTradeEngine {
       }
 
       let count = 0;
+      const errors: string[] = [];
       for (const p of positions) {
-        const side: 'LONG' | 'SHORT' = p.positionAmt > 0 ? 'LONG' : 'SHORT';
-        const qty = Math.abs(p.positionAmt);
-        await binanceClient.closePosition(p.symbol, side, qty);
-        this.recordClosedTrade({
-          symbol: p.symbol,
-          positionSide: side,
-          action: 'PANIC_CLOSE',
-          qty,
-          entryPrice: p.entryPrice,
-          closePrice: p.markPrice || p.entryPrice,
-          realizedPnl: Number((p.unRealizedProfit || 0).toFixed(2)),
-          pnlPct: 0,
-          isPaper: false,
-        });
-        count++;
+        try {
+          const side: 'LONG' | 'SHORT' = (p.positionSide === 'LONG' || p.positionSide === 'SHORT')
+            ? p.positionSide
+            : (p.positionAmt > 0 ? 'LONG' : 'SHORT');
+          const filter = await binanceClient.getSymbolFilter(p.symbol);
+          const qty = binanceClient.roundQuantity(Math.abs(p.positionAmt), filter.stepSize);
+          await binanceClient.closePosition(p.symbol, side, qty);
+          const posKey = `${p.symbol}_${side}`;
+          this.positionAvgCounts.delete(posKey);
+          this.streamLeaderPositions.delete(posKey);
+          this.recordClosedTrade({
+            symbol: p.symbol,
+            positionSide: side,
+            action: 'PANIC_CLOSE',
+            qty,
+            entryPrice: p.entryPrice,
+            closePrice: p.markPrice || p.entryPrice,
+            realizedPnl: Number((p.unRealizedProfit || 0).toFixed(2)),
+            pnlPct: 0,
+            isPaper: false,
+          });
+          count++;
+        } catch (err: any) {
+          const errMsg = err.response?.data?.msg || err.message;
+          errors.push(`${p.symbol}: ${errMsg}`);
+          this.log('ERROR', `Gagal menutup posisi ${p.symbol} saat panic close: ${errMsg}`);
+        }
+      }
+      this.saveVirtualState();
+
+      if (errors.length > 0 && count === 0) {
+        throw new Error(`Gagal panic close: ${errors.join(', ')}`);
       }
 
-      this.log('SUCCESS', `✅ Berhasil menutup ${count} posisi terbuka secara darurat!`);
-      return `Berhasil menutup ${count} posisi terbuka.`;
+      this.log('SUCCESS', `✅ Berhasil menutup ${count} posisi terbuka secara darurat!${errors.length > 0 ? ` (${errors.length} koin gagal)` : ''}`);
+      return `Berhasil menutup ${count} posisi terbuka.${errors.length > 0 ? ` Perhatian: ${errors.join(', ')}` : ''}`;
     } catch (e: any) {
       this.log('ERROR', `Gagal melakukan panic close: ${e.message}`);
       throw e;
@@ -2691,7 +2751,13 @@ export class CopyTradeEngine {
     // Min notional guard
     if (neededAddQty < filter.minQty) neededAddQty = filter.minQty;
     if (neededAddQty * markPrice < filter.minNotional) {
-      neededAddQty = binanceClient.roundQuantity(Math.ceil((filter.minNotional * 1.05) / markPrice / filter.stepSize) * filter.stepSize, filter.stepSize);
+      const minQtyForNotional = binanceClient.roundQuantity(Math.ceil((filter.minNotional * 1.05) / markPrice / filter.stepSize) * filter.stepSize, filter.stepSize);
+      const testMargin = ((userCurrentQty + minQtyForNotional) * markPrice) / lev;
+      if (this.config.maxModalPerCoin <= 0 || testMargin <= this.config.maxModalPerCoin) {
+        neededAddQty = minQtyForNotional;
+      } else {
+        throw new Error(`Kuantitas averaging ${sym} di bawah batas minimum Binance ($${filter.minNotional} USDT) dan menaikkannya melanggar Safety Cap ($${this.config.maxModalPerCoin} USDT).`);
+      }
     }
 
     if (this.config.paperTrading) {
@@ -2708,6 +2774,8 @@ export class CopyTradeEngine {
       userPos.margin = (newQty * newEntry) / lev;
       userPos.avgCount = counts.user;
       this.virtualPositions.set(posKey, userPos);
+      const updatedStream = this.streamLeaderPositions.get(posKey);
+      if (updatedStream) updatedStream.avgCount = counts.user;
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MANUAL SYNC AVG DOWN] Berhasil sinkronisasi virtual averaging ${sym} (+${neededAddQty} @ $${markPrice})!`);
       return {
@@ -2723,6 +2791,8 @@ export class CopyTradeEngine {
     const orderRes = await binanceClient.placeMarketOrder(sym, side, neededAddQty, false, positionSide);
     counts.user = counts.leader > 0 ? counts.leader : (counts.user || 0) + 1;
     this.positionAvgCounts.set(posKey, counts);
+    const updatedStream = this.streamLeaderPositions.get(posKey);
+    if (updatedStream) updatedStream.avgCount = counts.user;
     this.saveVirtualState();
 
     this.log('SUCCESS', `✅ [MANUAL SYNC AVG DOWN] Berhasil mengeksekusi averaging down susulan pada ${sym} (+${neededAddQty} @ $${markPrice})! Order ID: ${orderRes.orderId}`);
