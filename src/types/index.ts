@@ -189,6 +189,18 @@ export interface EngineStatus {
   pollingInfo?: PollingStatusInfo;
   weekendBreak?: WeekendBreakStatus;
   dailySchedule?: DailyScheduleStatus;
+  slippageSkippedOrders?: SkippedOrderInfo[];
+}
+
+export interface SkippedOrderInfo {
+  symbol: string;
+  positionSide: 'LONG' | 'SHORT';
+  type: 'NEW_POSITION' | 'AVERAGING';
+  leaderEntryPrice: number;
+  markPrice: number;
+  slippagePct: number;
+  skippedAt: number;
+  reason?: string;
 }
 
 export interface ClosedTrade {

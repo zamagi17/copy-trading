@@ -426,6 +426,29 @@ body {
   transform: translateY(-1px);
 }
 
+.btn-sync-entry {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 3px 9px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 4px;
+  background: rgba(14, 165, 233, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.12);
+}
+.btn-sync-entry:hover {
+  background: rgba(14, 165, 233, 0.35);
+  border-color: #38bdf8;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 0 14px rgba(14, 165, 233, 0.3);
+}
+
 /* Statistics Grid */
 .stats-grid {
   display: grid;

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus, DailyScheduleConfig, DailyScheduleStatus, DailyBalanceSnapshot } from '../types';
+import { AppConfig, EngineStatus, LeadPosition, LogEntry, UserPosition, BalanceInfo, ClosedTrade, PollingStatusInfo, LeadPortfolioDetail, WeekendBreakStatus, DailyScheduleConfig, DailyScheduleStatus, DailyBalanceSnapshot, SkippedOrderInfo } from '../types';
 import { binanceClient } from './binance';
 import { scraper } from './scraper';
 import { telegramService } from './telegram';
@@ -41,6 +41,7 @@ export class CopyTradeEngine {
   public virtualPositions: Map<string, UserPosition> = new Map();
   public streamLeaderPositions: Map<string, LeadPosition> = new Map();
   public positionAvgCounts: Map<string, { leader: number; user: number }> = new Map();
+  public slippageSkippedOrders: Map<string, SkippedOrderInfo> = new Map();
   public virtualWalletBalance: number = 100;
   public recentlyClosedCoins: Map<string, { symbol: string; positionSide: 'LONG' | 'SHORT'; closedAt: number; action: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
@@ -87,6 +88,9 @@ export class CopyTradeEngine {
         }
         if (Array.isArray(dbVs.positionAvgCounts)) {
           this.positionAvgCounts = new Map(dbVs.positionAvgCounts);
+        }
+        if (Array.isArray(dbVs.slippageSkippedOrders)) {
+          this.slippageSkippedOrders = new Map(dbVs.slippageSkippedOrders);
         }
         if (typeof dbVs.lastProcessedOrderTime === 'number' && dbVs.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = dbVs.lastProcessedOrderTime;
@@ -166,6 +170,7 @@ export class CopyTradeEngine {
         virtualPositions: Array.from(this.virtualPositions.entries()),
         streamLeaderPositions: Array.from(this.streamLeaderPositions.entries()),
         positionAvgCounts: Array.from(this.positionAvgCounts.entries()),
+        slippageSkippedOrders: Array.from(this.slippageSkippedOrders.entries()),
         lastProcessedOrderTime: this.lastProcessedOrderTime,
         processedOrderKeys: Array.from(this.processedOrderKeys).slice(-500),
         isHolidayAborted: this.isHolidayAborted,
@@ -203,6 +208,9 @@ export class CopyTradeEngine {
         }
         if (Array.isArray(data.positionAvgCounts)) {
           this.positionAvgCounts = new Map(data.positionAvgCounts);
+        }
+        if (Array.isArray(data.slippageSkippedOrders)) {
+          this.slippageSkippedOrders = new Map(data.slippageSkippedOrders);
         }
         if (typeof data.lastProcessedOrderTime === 'number' && data.lastProcessedOrderTime > 0) {
           this.lastProcessedOrderTime = data.lastProcessedOrderTime;
@@ -292,6 +300,7 @@ export class CopyTradeEngine {
         closedAt: now.getTime(),
         action: fullTrade.action,
       });
+      this.slippageSkippedOrders.delete(`${fullTrade.symbol}_${fullTrade.positionSide}`);
     }
 
     if (this.wsBroadcaster) {
@@ -1134,6 +1143,14 @@ export class CopyTradeEngine {
     const count = this.config.paperTrading ? this.virtualPositions.size : (this.lastUserPositions?.length ?? this.lastUserPositionsCount);
     const weekendBreakStatus = this.getWeekendBreakStatus(count);
 
+    // Bersihkan order terlewati yang sudah lewat dari 60 menit
+    const now = Date.now();
+    for (const [key, item] of this.slippageSkippedOrders.entries()) {
+      if (now - item.skippedAt > 60 * 60 * 1000) {
+        this.slippageSkippedOrders.delete(key);
+      }
+    }
+
     return {
       isActive: this.isRunning,
       portfolioId: this.config.portfolioId,
@@ -1148,6 +1165,7 @@ export class CopyTradeEngine {
       pollingInfo: this.getCurrentPollingInfo(),
       weekendBreak: weekendBreakStatus,
       dailySchedule: this.getDailyScheduleStatus(count),
+      slippageSkippedOrders: Array.from(this.slippageSkippedOrders.values()),
     };
   }
 
@@ -2044,7 +2062,30 @@ export class CopyTradeEngine {
     if (leaderPos.entryPrice > 0 && leaderPos.markPrice > 0) {
       const slippage = Math.abs((leaderPos.markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
       if (slippage > this.config.maxSlippagePct) {
-        this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan order agar tidak mengejar harga buruk!`);
+        const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+        this.slippageSkippedOrders.set(posKey, {
+          symbol: leaderPos.symbol,
+          positionSide: leaderPos.positionSide,
+          type: 'NEW_POSITION',
+          leaderEntryPrice: leaderPos.entryPrice,
+          markPrice: leaderPos.markPrice,
+          slippagePct: slippage,
+          skippedAt: Date.now(),
+          reason: `Slippage ${slippage.toFixed(2)}% melebihi batas ${this.config.maxSlippagePct}%`,
+        });
+        this.saveVirtualState();
+
+        this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan order agar tidak mengejar harga buruk! Tersedia tombol Re-Order (30 Menit) di dashboard.`);
+        this.sendTelegramRateLimited(
+          `SLIPPAGE_${posKey}`,
+          `⚠️ <b>ORDER DILEWATI - SLIPPAGE TINGGI</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
+          `💵 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+          `📊 Harga Pasar: <b>$${leaderPos.markPrice}</b>\n` +
+          `⚡ Selisih (Slippage): <b>${slippage.toFixed(2)}%</b> (Batas: ${this.config.maxSlippagePct}%)\n\n` +
+          `💡 <i>Tersedia tombol <b>Re-Order (30 Menit)</b> di Dashboard untuk mengeksekusi order susulan secara manual jika Anda ingin tetap masuk ke posisi ini.</i>`,
+          60000
+        );
         return null;
       }
     }
@@ -2225,7 +2266,30 @@ export class CopyTradeEngine {
     if (leaderPos.entryPrice > 0 && markPrice > 0 && this.config.maxSlippagePct > 0) {
       const slippage = Math.abs((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
       if (slippage > this.config.maxSlippagePct) {
-        this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada averaging ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan averaging agar tidak mengejar harga buruk!`);
+        const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+        this.slippageSkippedOrders.set(posKey, {
+          symbol: leaderPos.symbol,
+          positionSide: leaderPos.positionSide,
+          type: 'AVERAGING',
+          leaderEntryPrice: leaderPos.entryPrice,
+          markPrice: markPrice,
+          slippagePct: slippage,
+          skippedAt: Date.now(),
+          reason: `Averaging slippage ${slippage.toFixed(2)}% melebihi batas ${this.config.maxSlippagePct}%`,
+        });
+        this.saveVirtualState();
+
+        this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada averaging ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan averaging agar tidak mengejar harga buruk! Tersedia tombol Sync Avg (30 Menit) di dashboard.`);
+        this.sendTelegramRateLimited(
+          `SLIPPAGE_AVG_${posKey}`,
+          `⚠️ <b>AVERAGING DILEWATI - SLIPPAGE TINGGI</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
+          `💵 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+          `📊 Harga Pasar: <b>$${markPrice}</b>\n` +
+          `⚡ Selisih (Slippage): <b>${slippage.toFixed(2)}%</b> (Batas: ${this.config.maxSlippagePct}%)\n\n` +
+          `💡 <i>Tersedia tombol <b>Sync Avg (30 Menit)</b> di Dashboard untuk mengeksekusi penambahan layer secara manual jika Anda ingin tetap masuk.</i>`,
+          60000
+        );
         return null;
       }
     }
@@ -2860,6 +2924,7 @@ export class CopyTradeEngine {
       this.virtualPositions.set(posKey, userPos);
       const updatedStream = this.streamLeaderPositions.get(posKey);
       if (updatedStream) updatedStream.avgCount = counts.user;
+      this.slippageSkippedOrders.delete(posKey);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MANUAL SYNC AVG DOWN] Berhasil sinkronisasi virtual averaging ${sym} (+${neededAddQty} @ $${markPrice})!`);
       return {
@@ -2877,6 +2942,7 @@ export class CopyTradeEngine {
     this.positionAvgCounts.set(posKey, counts);
     const updatedStream = this.streamLeaderPositions.get(posKey);
     if (updatedStream) updatedStream.avgCount = counts.user;
+    this.slippageSkippedOrders.delete(posKey);
     this.saveVirtualState();
 
     this.log('SUCCESS', `✅ [MANUAL SYNC AVG DOWN] Berhasil mengeksekusi averaging down susulan pada ${sym} (+${neededAddQty} @ $${markPrice})! Order ID: ${orderRes.orderId}`);
@@ -2895,6 +2961,165 @@ export class CopyTradeEngine {
       message: `✅ Berhasil mengeksekusi averaging down susulan pada ${sym} (+${neededAddQty} koin)!`,
       addQty: neededAddQty,
     };
+  }
+
+  /**
+   * Eksekusi manual order baru (re-order susulan) untuk posisi yang sebelumnya dilewati karena slippage
+   * Memiliki jendela batas toleransi waktu 30 menit
+   */
+  async syncNewPosition(symbol: string, positionSide: 'LONG' | 'SHORT', force: boolean = false): Promise<{ success: boolean; message: string; position?: UserPosition }> {
+    const sym = symbol.toUpperCase();
+    const posKey = `${sym}_${positionSide}`;
+
+    // 1. Cek keberadaan posisi leader
+    const leaderPos = this.streamLeaderPositions.get(posKey) || this.lastLeaderPositions.get(posKey);
+    if (!leaderPos) {
+      throw new Error(`Posisi leader untuk ${sym} ${positionSide} tidak ditemukan atau sudah ditutup.`);
+    }
+
+    // 2. Ambil saldo & posisi user saat ini
+    let userBalance = 0;
+    let userPos: UserPosition | undefined;
+
+    if (this.config.paperTrading) {
+      userBalance = this.virtualWalletBalance;
+      userPos = this.virtualPositions.get(posKey);
+    } else if (binanceClient.isConfigured()) {
+      const bal = await binanceClient.getAccountBalance();
+      userBalance = bal.totalWalletBalance > 0 ? bal.totalWalletBalance : bal.availableBalance;
+      const openPositions = await binanceClient.getOpenPositions();
+      userPos = openPositions.find((p) => p.symbol === sym && p.positionSide === positionSide);
+    }
+
+    // Jika user sudah memiliki posisi terbuka, arahkan ke Sync Avg
+    if (userPos && Math.abs(userPos.positionAmt) > 0) {
+      throw new Error(`Akun Anda sudah memiliki posisi terbuka pada ${sym} ${positionSide}. Gunakan tombol Sync Avg jika ingin menambah muatan.`);
+    }
+
+    // 3. Validasi batas jendela toleransi waktu 30 menit
+    const skippedInfo = this.slippageSkippedOrders.get(posKey);
+    const refTime = skippedInfo?.skippedAt || leaderPos.updateTime || Date.now();
+    const elapsedMs = Date.now() - refTime;
+    const windowMs = 30 * 60 * 1000;
+
+    if (!force && elapsedMs > windowMs) {
+      const elapsedMins = Math.round(elapsedMs / 60000);
+      throw new Error(`Jendela waktu 30 menit untuk order susulan ${sym} telah berakhir (${elapsedMins} menit yang lalu). Demi keamanan akun, order dibatalkan.`);
+    }
+
+    // 4. Hitung kuantitas target
+    const filter = await binanceClient.getSymbolFilter(sym);
+    const markPrice = await binanceClient.getSymbolPrice(sym) || leaderPos.markPrice || leaderPos.entryPrice;
+    if (markPrice <= 0) {
+      throw new Error(`Gagal mendapatkan harga realtime bursa untuk ${sym}.`);
+    }
+
+    let targetQty = 0;
+    if (this.config.mode === 'FIXED_AMOUNT') {
+      targetQty = this.config.fixedAmountUsdt / markPrice;
+    } else if (this.config.mode === 'FIXED_RATIO') {
+      targetQty = (userBalance * 0.05 * this.config.ratioMultiplier) / markPrice;
+    } else {
+      // RATIO_EQUITY
+      const leaderEquity = this.lastLeaderEquity > 0 ? this.lastLeaderEquity : 50000;
+      const equityRatio = (userBalance / leaderEquity) * this.config.ratioMultiplier;
+      targetQty = leaderPos.amount * equityRatio;
+    }
+
+    // Safety Cap check
+    const lev = Math.max(1, leaderPos.leverage || 10);
+    const estMargin = (targetQty * markPrice) / lev;
+    if (this.config.maxModalPerCoin > 0 && estMargin > this.config.maxModalPerCoin) {
+      targetQty = (this.config.maxModalPerCoin * lev) / markPrice;
+      this.log('INFO', `🛡️ Safety Cap Aktif: Margin ${sym} dibatasi ke maksimal $${this.config.maxModalPerCoin} USDT`);
+    }
+
+    // Normalisasi lot size & min notional Binance ($5 USDT)
+    targetQty = binanceClient.roundQuantity(targetQty, filter.stepSize);
+    if (targetQty < filter.minQty) targetQty = filter.minQty;
+    if (targetQty * markPrice < filter.minNotional) {
+      targetQty = binanceClient.roundQuantity(Math.ceil((filter.minNotional * 1.05) / markPrice / filter.stepSize) * filter.stepSize, filter.stepSize);
+    }
+
+    if (targetQty <= 0) {
+      throw new Error(`Kuantitas order untuk ${sym} bernilai 0 atau tidak memenuhi batas minimum Binance.`);
+    }
+
+    // 5. Eksekusi Order
+    if (this.config.paperTrading) {
+      const newPos: UserPosition = {
+        symbol: sym,
+        positionSide: positionSide,
+        positionAmt: positionSide === 'LONG' ? targetQty : -targetQty,
+        entryPrice: markPrice,
+        markPrice: markPrice,
+        unRealizedProfit: 0,
+        leverage: lev,
+        marginType: 'CROSSED',
+        notional: targetQty * markPrice,
+        margin: (targetQty * markPrice) / lev,
+        avgCount: 0,
+      };
+
+      this.virtualPositions.set(posKey, newPos);
+      this.positionAvgCounts.set(posKey, { leader: leaderPos.avgCount || 0, user: 0 });
+      this.slippageSkippedOrders.delete(posKey);
+      this.saveVirtualState();
+
+      this.log('SUCCESS', `🧪 [MANUAL RE-ORDER SIMULASI] Berhasil eksekusi order susulan ${sym} ${positionSide} (${targetQty} koin @ $${markPrice})!`);
+      this.sendTelegram(
+        `⚡ <b>SINKRONISASI ORDER SUSULAN BERHASIL [🧪 SIMULASI]</b>\n\n` +
+        `🪙 Simbol: <b>${sym}</b>\n` +
+        `📊 Arah: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+        `📦 Kuantitas: <b>${targetQty}</b>\n` +
+        `⚡ Mode: <b>Manual Re-Order (Slippage Override)</b>`
+      );
+
+      return {
+        success: true,
+        message: `✅ Order susulan ${sym} ${positionSide} (${targetQty} koin @ $${markPrice}) berhasil masuk ke posisi akun Anda!`,
+        position: newPos,
+      };
+    }
+
+    // Live Binance Futures
+    if (!binanceClient.isConfigured()) {
+      throw new Error('API Key dan Secret Key Binance belum dikonfigurasi di dashboard.');
+    }
+
+    try {
+      if (this.config.syncLeverage) {
+        await binanceClient.setLeverage(sym, lev);
+      }
+      const side: 'BUY' | 'SELL' = positionSide === 'LONG' ? 'BUY' : 'SELL';
+      this.log('INFO', `⚡ [MANUAL RE-ORDER LIVE] Mengirim order susulan ke Binance: ${sym} ${side} ${targetQty}...`);
+      const orderRes = await binanceClient.placeMarketOrder(sym, side, targetQty, false, positionSide);
+      
+      this.positionAvgCounts.set(posKey, { leader: leaderPos.avgCount || 0, user: 0 });
+      this.slippageSkippedOrders.delete(posKey);
+      this.saveVirtualState();
+
+      this.log('SUCCESS', `✅ [MANUAL RE-ORDER LIVE] Order susulan ${sym} ${side} BERHASIL MASUK ke Binance Futures! Order ID: ${orderRes.orderId}`);
+      this.sendTelegram(
+        `⚡ <b>SINKRONISASI ORDER SUSULAN BERHASIL [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${sym}</b>\n` +
+        `📊 Arah: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+        `📦 Kuantitas: <b>${targetQty}</b>\n` +
+        `⚡ Order ID: <code>${orderRes.orderId || 'OK'}</code>\n` +
+        `💡 Mode: <b>Manual Re-Order (Slippage Override)</b>`
+      );
+
+      return {
+        success: true,
+        message: `✅ Order susulan real ${sym} ${side} (${targetQty} koin) berhasil masuk ke Binance Futures! Order ID: ${orderRes.orderId}`,
+      };
+    } catch (err: any) {
+      const errMsg = err.response?.data?.msg || err.message;
+      this.log('ERROR', `Gagal eksekusi order susulan di Binance: ${errMsg}`);
+      throw new Error(errMsg);
+    }
   }
 }
 

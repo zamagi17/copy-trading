@@ -116,6 +116,8 @@ const I18N = {
     badge_active_stream: 'AKTIF (STREAM)',
     badge_waiting_close: 'MENUNGGU CLOSE',
     badge_waiting_sync: 'MENUNGGU SINKRON',
+    badge_reorder: '⚡ Order Ulang',
+    badge_expired: '⏱️ Kadaluarsa (>30m)',
     badge_action_full: 'Tutup Penuh',
     badge_action_partial: 'Tutup Parsial',
     badge_action_sl: 'Emergency SL',
@@ -371,6 +373,8 @@ const I18N = {
     badge_active_stream: 'ACTIVE (STREAM)',
     badge_waiting_close: 'WAITING CLOSE',
     badge_waiting_sync: 'WAITING SYNC',
+    badge_reorder: '⚡ Re-Order',
+    badge_expired: '⏱️ Expired (>30m)',
     badge_action_full: 'Full Close',
     badge_action_partial: 'Partial Close',
     badge_action_sl: 'Emergency SL',
@@ -1531,7 +1535,29 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
         ? `<span class="badge badge-cyan">${t('badge_active_stream', 'AKTIF (STREAM)')}</span>` 
         : `<span class="badge badge-yellow">${t('badge_waiting_close', 'MENUNGGU CLOSE')}</span>`;
     } else {
-      syncBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>`;
+      // lp && !up -> Posisi leader aktif namun akun belum masuk (misal terlewat slippage)
+      const skippedOrders = currentStatus?.slippageSkippedOrders || [];
+      const skippedItem = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side);
+      const refTime = skippedItem?.skippedAt || lp?.updateTime || 0;
+      const elapsedMs = refTime > 0 ? (Date.now() - refTime) : 0;
+      const windowMs = 30 * 60 * 1000;
+      const isWithin30M = refTime > 0 && elapsedMs <= windowMs;
+      const remainingMins = Math.max(1, Math.ceil((windowMs - elapsedMs) / 60000));
+
+      let actionBtn = '';
+      if (isWithin30M) {
+        const btnTitle = currentLang === 'en'
+          ? `Order skipped due to slippage! Click to re-order immediately (${remainingMins}m window remaining)`
+          : `Order terlewat karena batas slippage! Klik untuk order ulang seketika (sisa ${remainingMins} menit)`;
+        actionBtn = `<br/><button class="btn-sync-entry" onclick="syncEntry('${symbol}', '${side}')" title="${btnTitle}">⚡ Re-Order (${remainingMins}m)</button>`;
+      } else if (refTime > 0 && elapsedMs > windowMs) {
+        actionBtn = `<br/><span class="badge badge-gray text-xs" title="${currentLang === 'en' ? '30-minute re-order window expired' : 'Batas toleransi order 30 menit telah berakhir'}">⏱️ Kadaluarsa (>30m)</span>`;
+      } else {
+        const btnTitle = currentLang === 'en' ? 'Click to re-order and open position now' : 'Klik untuk order susulan seketika';
+        actionBtn = `<br/><button class="btn-sync-entry" onclick="syncEntry('${symbol}', '${side}')" title="${btnTitle}">⚡ Re-Order (30m)</button>`;
+      }
+
+      syncBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>${actionBtn}`;
     }
 
     // Cari entry leader dan volume dari lp atau dari riwayat orders stream
@@ -1699,9 +1725,17 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       }
     } else {
       const lBadge = leaderAvg === 0 ? 'badge-gray' : (leaderAvg === 1 ? 'badge-yellow' : 'badge-purple');
-      const uBadge = userAvg === 0 ? 'badge-gray' : (userAvg === 1 ? 'badge-yellow' : 'badge-purple');
+      const skippedOrders = currentStatus?.slippageSkippedOrders || [];
+      const skippedAvg = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side && s.type === 'AVERAGING');
+      const refAvgTime = skippedAvg?.skippedAt || 0;
+      const elapsedAvgMs = refAvgTime > 0 ? (Date.now() - refAvgTime) : 0;
+      const windowAvgMs = 30 * 60 * 1000;
+      const isAvgWithin30M = refAvgTime > 0 && elapsedAvgMs <= windowAvgMs;
+      const remainingAvgMins = Math.max(1, Math.ceil((windowAvgMs - elapsedAvgMs) / 60000));
+      const avgBtnLabel = isAvgWithin30M ? `⚡ Sync Avg (${remainingAvgMins}m)` : '⚡ Sync Avg';
+
       const syncBtn = (up && leaderAvg > userAvg)
-        ? `<br/><button class="btn-sync-avg" onclick="syncAvgDown('${symbol}', '${side}')" title="${currentLang === 'en' ? 'Catch up missing avg down layer!' : 'Ketinggalan layer! Klik untuk averaging down susulan'}">⚡ Sync Avg</button>`
+        ? `<br/><button class="btn-sync-avg" onclick="syncAvgDown('${symbol}', '${side}')" title="${currentLang === 'en' ? 'Catch up missing avg down layer!' : 'Ketinggalan layer! Klik untuk averaging down susulan'}">${avgBtnLabel}</button>`
         : '';
       avgDownDisplay = `
         <small class="text-dim">L:</small> <span class="badge ${lBadge}" title="Leader: ${leaderAvg}x avg down (${leaderAvg + 1} layer)">${leaderAvg > 0 ? `+${leaderAvg}x` : '0x'}</span><br/>
@@ -2921,3 +2955,40 @@ window.syncAvgDown = async function(symbol, side) {
     alert((currentLang === 'en' ? 'Error: ' : 'Kesalahan: ') + (err.message || 'Error'));
   }
 };
+
+window.syncEntry = async function(symbol, side) {
+  const skippedOrders = currentStatus?.slippageSkippedOrders || [];
+  const item = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side);
+
+  let detailExtra = '';
+  if (item) {
+    const elapsedMs = Date.now() - item.skippedAt;
+    const remainingMins = Math.max(1, Math.ceil((30 * 60 * 1000 - elapsedMs) / 60000));
+    detailExtra = currentLang === 'en'
+      ? `\n\n📌 Leader Entry: $${formatPrice(item.leaderEntryPrice)}\n📌 Realtime Mark: $${formatPrice(item.markPrice)} (Slippage: ${item.slippagePct.toFixed(2)}%)\n⏱️ Remaining Window: ${remainingMins} minutes (from 30m limit)\n`
+      : `\n\n📌 Entry Leader: $${formatPrice(item.leaderEntryPrice)}\n📌 Harga Mark Bursa: $${formatPrice(item.markPrice)} (Slippage: ${item.slippagePct.toFixed(2)}%)\n⏱️ Sisa Jendela Toleransi: ${remainingMins} menit (dari batas 30 menit)\n`;
+  }
+
+  const confirmMsg = currentLang === 'en'
+    ? `⚡ Re-Order Confirmation for ${symbol} (${side})!${detailExtra}\nThis position was skipped by Slippage Guard. Do you want to execute and open this position now immediately at current market price?`
+    : `⚡ Konfirmasi Order Ulang untuk ${symbol} (${side})!${detailExtra}\nPosisi ini sebelumnya dilewati oleh batas Slippage Guard. Apakah Anda ingin mengeksekusi dan membuka posisi ini sekarang seketika pada harga pasar saat ini?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch('/api/positions/sync-entry', {
+      method: 'POST',
+      body: JSON.stringify({ symbol, positionSide: side })
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(data.message);
+      if (typeof fetchStatus === 'function') fetchStatus();
+    } else {
+      alert((currentLang === 'en' ? 'Failed: ' : 'Gagal: ') + (data.message || 'Error'));
+    }
+  } catch (err) {
+    alert((currentLang === 'en' ? 'Error: ' : 'Kesalahan: ') + (err.message || 'Error'));
+  }
+};
+
