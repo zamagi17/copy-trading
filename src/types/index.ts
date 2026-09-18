@@ -89,6 +89,8 @@ export interface AppConfig {
   fixedAmountUsdt: number;
   maxModalPerCoin: number;
   maxSlippagePct: number;
+  reverseTrading?: boolean; // Mode inverse trading (Leader Long -> User Short, Leader Short -> User Long)
+  reorderWindowMinutes?: number; // Batas toleransi waktu order susulan (re-order) dalam satuan menit (default: 30)
   syncLeverage: boolean;
   emergencySlPct: number;
   pollingIntervalMs: number;

@@ -222,6 +222,10 @@
             <span class="spec-label"><i data-lucide="palmtree"></i> <span data-i18n="spec_weekend_label">Libur Akhir Pekan:</span></span>
             <span class="spec-value text-green" id="specWeekendBreak">Aktif (CST)</span>
           </div>
+          <div class="spec-item">
+            <span class="spec-label"><i data-lucide="repeat"></i> <span data-i18n="spec_reverse_label">Reverse Mode:</span></span>
+            <span class="spec-value text-muted" id="specReverseTrading">Normal (Follow)</span>
+          </div>
         </div>
       </div>
     </section>
@@ -663,12 +667,33 @@
               <small data-i18n="hint_emergency_sl">Auto cut-loss independen jika floating minus akun mencapai X%.</small>
             </div>
 
+            <div class="form-field">
+              <label for="inputReorderWindow" data-i18n="label_reorder_window">Batas Toleransi Waktu Re-Order (Menit):</label>
+              <input type="number" id="inputReorderWindow" step="5" min="5" max="1440" value="30">
+              <small data-i18n="hint_reorder_window">Batas waktu untuk order susulan yang terlewat (misal: 30 menit, 60 menit, 120 menit = 2 jam).</small>
+            </div>
+          </div>
+
+          <div class="form-row">
             <div class="form-field checkbox-field">
               <label class="custom-checkbox">
                 <input type="checkbox" id="checkSyncLeverage" checked>
                 <span class="checkmark"></span>
                 <span data-i18n="check_sync_leverage">Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)</span>
               </label>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.08);">
+            <div class="form-field checkbox-field" style="margin-top: 4px;">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkReverseTrading">
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #f43f5e;" data-i18n="check_reverse_trading">🔄 Mode Reverse Trading / Fade Leader (Posisi Terbalik)</span>
+              </label>
+              <small data-i18n="hint_reverse_trading" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                Jika aktif, bot mengambil arah berlawanan (Leader LONG ➔ Akun SHORT, Leader SHORT ➔ Akun LONG). Berlaku <strong>hanya untuk posisi baru</strong>. Averaging down & penutupan tetap selaras dengan posisi aktif akun Anda.
+              </small>
             </div>
           </div>
         </fieldset>

@@ -400,12 +400,17 @@ app.post('/api/positions/sync-avg-down', requireAuth, async (req, res) => {
 
 app.post('/api/positions/sync-entry', requireAuth, async (req, res) => {
   try {
-    const { symbol, positionSide, force } = req.body;
+    const { symbol, positionSide, force, invert } = req.body;
     if (!symbol || !positionSide) {
       res.status(400).json({ success: false, message: 'Symbol dan positionSide wajib diisi!' });
       return;
     }
-    const result = await engine.syncNewPosition(symbol, positionSide, Boolean(force));
+    const result = await engine.syncNewPosition(
+      symbol,
+      positionSide,
+      Boolean(force),
+      invert !== undefined ? Boolean(invert) : undefined
+    );
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });

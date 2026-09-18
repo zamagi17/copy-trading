@@ -146,6 +146,76 @@ export class DatabaseService {
   }
 
   /**
+   * Menggabungkan konfigurasi lokal (file) dengan konfigurasi database (DB) secara cerdas:
+   * 1. Kredensial aktif di DB (Binance API/Secret, Telegram, Target Leader, Password) tidak akan pernah tertimpa string kosong dari Git.
+   * 2. Parameter baru yang baru ditambahkan di kode (seperti reorderWindowMinutes, reverseTrading) otomatis dimasukkan.
+   * 3. Pengaturan kustom user di dashboard tetap dipertahankan.
+   */
+  public mergeAppConfigs(fileCfg: any, dbCfg: any): AppConfig {
+    if (!dbCfg) return fileCfg;
+    if (!fileCfg) return dbCfg;
+
+    const merged: any = { ...fileCfg, ...dbCfg };
+
+    // Kredensial penting: Jangan pernah timpa nilai DB yang sudah ada dengan string kosong dari file git
+    if (dbCfg.binanceApiKey && dbCfg.binanceApiKey.trim() !== '') {
+      merged.binanceApiKey = dbCfg.binanceApiKey;
+    }
+    if (dbCfg.binanceSecretKey && dbCfg.binanceSecretKey.trim() !== '') {
+      merged.binanceSecretKey = dbCfg.binanceSecretKey;
+    }
+    if (dbCfg.portfolioId && dbCfg.portfolioId.trim() !== '') {
+      merged.portfolioId = dbCfg.portfolioId;
+    }
+    if (dbCfg.adminPassword && dbCfg.adminPassword.trim() !== '') {
+      merged.adminPassword = dbCfg.adminPassword;
+    }
+    if (dbCfg.jwtSecret && dbCfg.jwtSecret.trim() !== '') {
+      merged.jwtSecret = dbCfg.jwtSecret;
+    }
+
+    // Nested Proxy
+    if (dbCfg.proxy) {
+      merged.proxy = { ...(fileCfg.proxy || {}), ...(dbCfg.proxy || {}) };
+      if (dbCfg.proxy.password && dbCfg.proxy.password.trim() !== '') {
+        merged.proxy.password = dbCfg.proxy.password;
+      }
+    }
+
+    // Nested Telegram
+    if (dbCfg.telegram) {
+      merged.telegram = { ...(fileCfg.telegram || {}), ...(dbCfg.telegram || {}) };
+      if (dbCfg.telegram.botToken && dbCfg.telegram.botToken.trim() !== '') {
+        merged.telegram.botToken = dbCfg.telegram.botToken;
+      }
+      if (dbCfg.telegram.chatId && dbCfg.telegram.chatId.trim() !== '') {
+        merged.telegram.chatId = dbCfg.telegram.chatId;
+      }
+    }
+
+    // Nested Schedules
+    if (fileCfg.weekendBreak || dbCfg.weekendBreak) {
+      merged.weekendBreak = { ...(fileCfg.weekendBreak || {}), ...(dbCfg.weekendBreak || {}) };
+    }
+    if (fileCfg.dailySchedule || dbCfg.dailySchedule) {
+      merged.dailySchedule = { ...(fileCfg.dailySchedule || {}), ...(dbCfg.dailySchedule || {}) };
+    }
+    if (fileCfg.adaptivePolling || dbCfg.adaptivePolling) {
+      merged.adaptivePolling = { ...(fileCfg.adaptivePolling || {}), ...(dbCfg.adaptivePolling || {}) };
+    }
+
+    // Parameter baru
+    if (dbCfg.reorderWindowMinutes === undefined && fileCfg.reorderWindowMinutes !== undefined) {
+      merged.reorderWindowMinutes = fileCfg.reorderWindowMinutes;
+    }
+    if (dbCfg.reverseTrading === undefined && fileCfg.reverseTrading !== undefined) {
+      merged.reverseTrading = fileCfg.reverseTrading;
+    }
+
+    return merged as AppConfig;
+  }
+
+  /**
    * Rekonsiliasi Dua Arah Cerdas (PostgreSQL <-> File JSON):
    * Mencegah "data pincang" jika salah satu penyimpanan sempat offline atau diedit manual.
    */
@@ -153,33 +223,30 @@ export class DatabaseService {
     try {
       // 1. REKONSILIASI KONFIGURASI (app_config)
       const cfgRes = await client.query('SELECT config, updated_at FROM app_config WHERE id = 1;');
-      const fileMtimeCfg = fs.existsSync(CONFIG_PATH) ? fs.statSync(CONFIG_PATH).mtimeMs : 0;
+      let fileCfg: any = {};
+      if (fs.existsSync(CONFIG_PATH)) {
+        try {
+          fileCfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+        } catch {}
+      }
 
       if (cfgRes.rows.length === 0 && fs.existsSync(CONFIG_PATH)) {
-        const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-        const parsed = JSON.parse(raw);
         await client.query(
           'INSERT INTO app_config (id, config, updated_at) VALUES (1, $1, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING;',
-          [JSON.stringify(parsed)]
+          [JSON.stringify(fileCfg)]
         );
         console.log('[Database] 📦 Migrasi config.json ke PostgreSQL selesai.');
-      } else if (cfgRes.rows.length > 0 && fs.existsSync(CONFIG_PATH)) {
-        const dbUpdated = cfgRes.rows[0].updated_at ? new Date(cfgRes.rows[0].updated_at).getTime() : 0;
-        // Jika config.json diedit manual di disk lebih baru dari DB (>2 detik):
-        if (fileMtimeCfg > dbUpdated + 2000) {
-          try {
-            const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-            const parsed = JSON.parse(raw);
-            await client.query(
-              'UPDATE app_config SET config = $1, updated_at = CURRENT_TIMESTAMP WHERE id = 1;',
-              [JSON.stringify(parsed)]
-            );
-            console.log('[Database] 🔄 config.json diedit secara lokal. Konfigurasi disinkronkan ke PostgreSQL.');
-          } catch {}
-        } else {
-          // DB lebih baru: sinkronkan ke file lokal
-          fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfgRes.rows[0].config, null, 2), 'utf-8');
-        }
+      } else if (cfgRes.rows.length > 0) {
+        const dbCfg = cfgRes.rows[0].config;
+        const merged = this.mergeAppConfigs(fileCfg, dbCfg);
+
+        // Update DB dan file lokal secara aman agar selalu sinkron & terlindungi
+        await client.query(
+          'UPDATE app_config SET config = $1, updated_at = CURRENT_TIMESTAMP WHERE id = 1;',
+          [JSON.stringify(merged)]
+        );
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf-8');
+        console.log('[Database] 🔄 Konfigurasi PostgreSQL & config.json lokal disinkronkan & digabungkan secara aman.');
       }
 
       // 2. REKONSILIASI VIRTUAL STATE (virtual_state)

@@ -70,6 +70,11 @@ const I18N = {
     spec_leverage_label: 'Sync Leverage:',
     spec_leverage_auto: 'Otomatis (Cross)',
     spec_leverage_manual: 'Manual',
+    spec_reverse_label: 'Reverse Mode:',
+    spec_reverse_active: 'Inversi (Fade)',
+    spec_reverse_active_title: 'Mode Reverse Aktif: Mengambil posisi berlawanan dari posisi baru leader',
+    spec_reverse_normal: 'Normal (Follow)',
+    spec_reverse_normal_title: 'Mode Normal: Mengikuti arah posisi leader',
 
     tab_active_positions: 'Posisi Terbuka',
     tab_closed_trades: 'Riwayat Trade Selesai',
@@ -113,6 +118,8 @@ const I18N = {
     empty_closed_desc: 'Setiap transaksi yang selesai (TP penuh, TP parsial, Cut Loss) akan dicatat rapi di sini.',
 
     badge_connected: 'TERKONEKSI',
+    badge_connected_inverse: 'TERKONEKSI (INVERSE)',
+    title_inverse_mode: 'Posisi Reverse/Fade Leader',
     badge_active_stream: 'AKTIF (STREAM)',
     badge_waiting_close: 'MENUNGGU CLOSE',
     badge_waiting_sync: 'MENUNGGU SINKRON',
@@ -162,7 +169,11 @@ const I18N = {
     hint_max_slippage: 'Batalkan order jika harga sudah lari > toleransi dari entry leader.',
     label_emergency_sl: 'Emergency Stop Loss Akun (%):',
     hint_emergency_sl: 'Auto cut-loss independen jika floating minus akun mencapai X%.',
+    label_reorder_window: 'Batas Toleransi Waktu Re-Order (Menit):',
+    hint_reorder_window: 'Batas waktu toleransi order susulan yang terlewat (misal: 30 menit, 60 menit, 120 menit = 2 jam).',
     check_sync_leverage: 'Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)',
+    check_reverse_trading: '🔄 Mode Reverse Trading / Fade Leader (Posisi Terbalik)',
+    hint_reverse_trading: 'Jika aktif, bot mengambil arah berlawanan (Leader LONG ➔ Akun SHORT, Leader SHORT ➔ Akun LONG). Berlaku hanya untuk posisi baru. Averaging down & penutupan tetap selaras dengan posisi aktif akun Anda.',
     legend_proxy: 'Residential Proxy (Anti Blokir Cloudflare)',
     check_proxy_enable: 'Aktifkan Residential Proxy (Rekomendasi: DataImpulse / Webshare)',
     btn_test_proxy: 'Uji Koneksi Proxy',
@@ -327,6 +338,11 @@ const I18N = {
     spec_leverage_label: 'Sync Leverage:',
     spec_leverage_auto: 'Auto (Cross)',
     spec_leverage_manual: 'Manual',
+    spec_reverse_label: 'Reverse Mode:',
+    spec_reverse_active: 'Inverse (Fade)',
+    spec_reverse_active_title: 'Reverse Mode Active: Takes opposite side of leader newly opened positions',
+    spec_reverse_normal: 'Normal (Follow)',
+    spec_reverse_normal_title: 'Normal Mode: Follows leader position direction',
 
     tab_active_positions: 'Open Positions',
     tab_closed_trades: 'Closed Trades History',
@@ -370,6 +386,8 @@ const I18N = {
     empty_closed_desc: 'Every closed trade (full TP, partial TP, cut loss) will be neatly logged here.',
 
     badge_connected: 'CONNECTED',
+    badge_connected_inverse: 'CONNECTED (INVERSE)',
+    title_inverse_mode: 'Reverse / Fade Leader Position',
     badge_active_stream: 'ACTIVE (STREAM)',
     badge_waiting_close: 'WAITING CLOSE',
     badge_waiting_sync: 'WAITING SYNC',
@@ -419,7 +437,11 @@ const I18N = {
     hint_max_slippage: 'Cancel order if market price deviates > tolerance from leader entry.',
     label_emergency_sl: 'Account Emergency Stop Loss (%):',
     hint_emergency_sl: 'Independent auto cut-loss if account floating loss reaches X%.',
+    label_reorder_window: 'Re-Order Tolerance Window (Minutes):',
+    hint_reorder_window: 'Time tolerance limit for skipped catch-up orders (e.g., 30 mins, 60 mins, 120 mins = 2 hours).',
     check_sync_leverage: 'Auto Sync Leader Leverage & Margin Mode (10x/20x Cross)',
+    check_reverse_trading: '🔄 Reverse Trading Mode / Fade Leader (Opposite Position)',
+    hint_reverse_trading: 'When enabled, bot opens opposite positions (Leader LONG ➔ User SHORT, Leader SHORT ➔ User LONG). Applies strictly to newly opened positions. Averaging down & closes remain aligned with your active position.',
     legend_proxy: 'Residential Proxy (Cloudflare Bypass)',
     check_proxy_enable: 'Enable Residential Proxy (Recommended: DataImpulse / Webshare)',
     btn_test_proxy: 'Test Proxy Connection',
@@ -740,7 +762,9 @@ const inputFixedAmount = document.getElementById('inputFixedAmount');
 const inputMaxModalPerCoin = document.getElementById('inputMaxModalPerCoin');
 const inputMaxSlippage = document.getElementById('inputMaxSlippage');
 const inputEmergencySl = document.getElementById('inputEmergencySl');
+const inputReorderWindow = document.getElementById('inputReorderWindow');
 const checkSyncLeverage = document.getElementById('checkSyncLeverage');
+const checkReverseTrading = document.getElementById('checkReverseTrading');
 const checkProxyEnabled = document.getElementById('checkProxyEnabled');
 const inputProxyHost = document.getElementById('inputProxyHost');
 const inputProxyPort = document.getElementById('inputProxyPort');
@@ -1261,6 +1285,20 @@ function updateConfigSpecs(cfg) {
     specLeverageSync.innerText = cfg.syncLeverage !== false ? t('spec_leverage_auto', 'Otomatis (Cross)') : t('spec_leverage_manual', 'Manual');
   }
 
+  // 6b. Reverse Trading (Fade Leader) Mode
+  const specReverseTrading = document.getElementById('specReverseTrading');
+  if (specReverseTrading) {
+    if (cfg.reverseTrading) {
+      specReverseTrading.innerText = `🔄 ${t('spec_reverse_active', 'Inversi (Fade)')}`;
+      specReverseTrading.className = 'spec-value text-red font-bold';
+      specReverseTrading.title = t('spec_reverse_active_title', 'Mode Reverse Aktif: Mengambil posisi berlawanan dari posisi baru leader');
+    } else {
+      specReverseTrading.innerText = t('spec_reverse_normal', 'Normal (Follow)');
+      specReverseTrading.className = 'spec-value text-muted';
+      specReverseTrading.title = t('spec_reverse_normal_title', 'Mode Normal: Mengikuti arah posisi leader');
+    }
+  }
+
   // 7. Simulation / Live Futures Badges
   const isSim = cfg.paperTrading !== false;
   const accountModeBadge = document.getElementById('accountModeBadge');
@@ -1508,28 +1546,79 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
     userMap.set(`${up.symbol}_${up.positionSide}`, up);
   }
 
-  // Gabungkan semua key unik (dari posisi leader dan posisi akun pengguna)
-  const allKeys = new Set([...leaderMap.keys(), ...userMap.keys()]);
+  // Pairing logic: Pair Leader and User positions for each coin
+  // Mendukung pairing langsung (Direct: LONG <-> LONG)
+  // maupun pairing terbalik jika inverse trading aktif (Inverse: LONG <-> SHORT)
+  const pairs = [];
+  const processedUserKeys = new Set();
+
+  for (const lp of leaderList) {
+    const directKey = `${lp.symbol}_${lp.positionSide}`;
+    const oppSide = lp.positionSide === 'LONG' ? 'SHORT' : 'LONG';
+    const oppKey = `${lp.symbol}_${oppSide}`;
+
+    let matchedUserPos = userMap.get(directKey);
+    let isInversePair = false;
+
+    if (matchedUserPos) {
+      processedUserKeys.add(directKey);
+    } else if (userMap.has(oppKey)) {
+      matchedUserPos = userMap.get(oppKey);
+      processedUserKeys.add(oppKey);
+      isInversePair = true;
+    }
+
+    pairs.push({
+      key: directKey,
+      lp,
+      up: matchedUserPos,
+      isInversePair,
+    });
+  }
+
+  // Sisa posisi user yang belum terpetakan ke posisi leader manapun
+  for (const up of userList) {
+    const uKey = `${up.symbol}_${up.positionSide}`;
+    if (!processedUserKeys.has(uKey)) {
+      pairs.push({
+        key: uKey,
+        lp: undefined,
+        up,
+        isInversePair: false,
+      });
+    }
+  }
+
   let html = '';
 
-  for (const key of allKeys) {
-    const lp = leaderMap.get(key);
-    const up = userMap.get(key);
+  for (const item of pairs) {
+    const { lp, up, isInversePair } = item;
 
     const symbol = lp ? lp.symbol : up?.symbol || '';
-    const side = lp ? lp.positionSide : up?.positionSide || 'LONG';
+    const side = lp ? lp.positionSide : (up ? up.positionSide : 'LONG');
     const leverage = lp?.leverage || up?.leverage || 10;
 
-    const sideBadge = side === 'LONG' 
-      ? '<span class="badge badge-green">LONG</span>' 
-      : '<span class="badge badge-red">SHORT</span>';
+    let sideBadge = '';
+    if (isInversePair && lp && up) {
+      const lSideClass = lp.positionSide === 'LONG' ? 'badge-green' : 'badge-red';
+      const uSideClass = up.positionSide === 'LONG' ? 'badge-green' : 'badge-red';
+      sideBadge = `<span class="badge ${lSideClass}" title="Arah Posisi Leader">L:${lp.positionSide}</span> / <span class="badge ${uSideClass}" title="Arah Posisi Akun Anda">U:${up.positionSide}</span> <span class="badge badge-purple" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.5); color: #c084fc;" title="${t('title_inverse_mode', 'Posisi Reverse/Fade Leader')}">🔄 INV</span>`;
+    } else {
+      sideBadge = side === 'LONG' 
+        ? '<span class="badge badge-green">LONG</span>' 
+        : '<span class="badge badge-red">SHORT</span>';
+    }
 
     const userPnlVal = up ? (Number(up.unRealizedProfit) || 0) : 0;
     const userPnlColor = !up ? 'text-muted' : (userPnlVal > 0.001 ? 'text-green' : userPnlVal < -0.001 ? 'text-red' : 'text-muted');
 
     let syncBadge = '';
     if (lp && up) {
-      syncBadge = `<span class="badge badge-cyan">${t('badge_connected', 'TERKONEKSI')}</span>`;
+      if (isInversePair) {
+        syncBadge = `<span class="badge badge-purple" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.5); color: #c084fc;">${t('badge_connected_inverse', 'TERKONEKSI (INVERSE)')}</span>`;
+      } else {
+        syncBadge = `<span class="badge badge-cyan">${t('badge_connected', 'TERKONEKSI')}</span>`;
+      }
     } else if (up && !lp) {
       syncBadge = isPrivate 
         ? `<span class="badge badge-cyan">${t('badge_active_stream', 'AKTIF (STREAM)')}</span>` 
@@ -1540,21 +1629,34 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       const skippedItem = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side);
       const refTime = skippedItem?.skippedAt || lp?.updateTime || 0;
       const elapsedMs = refTime > 0 ? (Date.now() - refTime) : 0;
-      const windowMs = 30 * 60 * 1000;
-      const isWithin30M = refTime > 0 && elapsedMs <= windowMs;
+      const windowMinutes = Math.max(1, currentConfig?.reorderWindowMinutes || 30);
+      const windowMs = windowMinutes * 60 * 1000;
+      const isWithinWindow = refTime > 0 && elapsedMs <= windowMs;
       const remainingMins = Math.max(1, Math.ceil((windowMs - elapsedMs) / 60000));
+      const oppositeSide = side === 'LONG' ? 'SHORT' : 'LONG';
 
       let actionBtn = '';
-      if (isWithin30M) {
-        const btnTitle = currentLang === 'en'
-          ? `Order skipped due to slippage! Click to re-order immediately (${remainingMins}m window remaining)`
-          : `Order terlewat karena batas slippage! Klik untuk order ulang seketika (sisa ${remainingMins} menit)`;
-        actionBtn = `<br/><button class="btn-sync-entry" onclick="syncEntry('${symbol}', '${side}')" title="${btnTitle}">⚡ Re-Order (${remainingMins}m)</button>`;
+      if (isWithinWindow) {
+        const btnTitleNormal = currentLang === 'en'
+          ? `Order skipped due to slippage! Click to re-order normally (${side}) (${remainingMins}m window remaining)`
+          : `Order terlewat batas slippage! Klik untuk order ulang searah leader (${side}) (sisa ${remainingMins} menit)`;
+        const btnTitleInv = currentLang === 'en'
+          ? `Order skipped due to slippage! Click to re-order inverse (${oppositeSide}) (${remainingMins}m window remaining)`
+          : `Order terlewat batas slippage! Klik untuk order ulang kebalikan/fade (${oppositeSide}) (sisa ${remainingMins} menit)`;
+
+        actionBtn = `<div style="display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap;">` +
+          `<button class="btn-sync-entry" onclick="syncEntry('${symbol}', '${side}', false)" title="${btnTitleNormal}">⚡ Re-Order (${remainingMins}m)</button>` +
+          `<button class="btn-sync-entry-inv" onclick="syncEntry('${symbol}', '${side}', true)" title="${btnTitleInv}">🔄 Re-Order Inv (${remainingMins}m)</button>` +
+          `</div>`;
       } else if (refTime > 0 && elapsedMs > windowMs) {
-        actionBtn = `<br/><span class="badge badge-gray text-xs" title="${currentLang === 'en' ? '30-minute re-order window expired' : 'Batas toleransi order 30 menit telah berakhir'}">⏱️ Kadaluarsa (>30m)</span>`;
+        actionBtn = `<br/><span class="badge badge-gray text-xs" title="${currentLang === 'en' ? `Re-order window (${windowMinutes}m) expired` : `Batas toleransi order ${windowMinutes} menit telah berakhir`}">⏱️ Kadaluarsa (>${windowMinutes}m)</span>`;
       } else {
-        const btnTitle = currentLang === 'en' ? 'Click to re-order and open position now' : 'Klik untuk order susulan seketika';
-        actionBtn = `<br/><button class="btn-sync-entry" onclick="syncEntry('${symbol}', '${side}')" title="${btnTitle}">⚡ Re-Order (30m)</button>`;
+        const btnTitleNormal = currentLang === 'en' ? 'Click to re-order and open position now' : 'Klik untuk order susulan seketika';
+        const btnTitleInv = currentLang === 'en' ? 'Click to re-order inverse and open opposite position now' : 'Klik untuk order susulan kebalikan seketika';
+        actionBtn = `<div style="display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap;">` +
+          `<button class="btn-sync-entry" onclick="syncEntry('${symbol}', '${side}', false)" title="${btnTitleNormal}">⚡ Re-Order (${windowMinutes}m)</button>` +
+          `<button class="btn-sync-entry-inv" onclick="syncEntry('${symbol}', '${side}', true)" title="${btnTitleInv}">🔄 Re-Order Inv (${windowMinutes}m)</button>` +
+          `</div>`;
       }
 
       syncBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>${actionBtn}`;
@@ -1615,7 +1717,8 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       const refEntry = (up && up.entryPrice > 0) ? up.entryPrice : leaderEntryPrice;
       let markColor = 'text-cyan';
       if (refEntry > 0) {
-        if (side === 'LONG') {
+        const activeSide = up ? up.positionSide : side;
+        if (activeSide === 'LONG') {
           markColor = markPrice >= refEntry ? 'text-green' : 'text-red';
         } else {
           markColor = markPrice <= refEntry ? 'text-green' : 'text-red';
@@ -2050,7 +2153,9 @@ function openSettingsModal() {
   inputMaxModalPerCoin.value = currentConfig.maxModalPerCoin ?? 0;
   inputMaxSlippage.value = currentConfig.maxSlippagePct ?? 0.5;
   inputEmergencySl.value = currentConfig.emergencySlPct ?? 10;
+  if (inputReorderWindow) inputReorderWindow.value = currentConfig.reorderWindowMinutes ?? 30;
   checkSyncLeverage.checked = currentConfig.syncLeverage ?? true;
+  if (checkReverseTrading) checkReverseTrading.checked = currentConfig.reverseTrading ?? false;
 
   // Proxy
   checkProxyEnabled.checked = currentConfig.proxy?.enabled ?? false;
@@ -2346,7 +2451,9 @@ async function saveSettings() {
     maxModalPerCoin: !isNaN(parseFloat(inputMaxModalPerCoin.value)) ? Math.max(0, parseFloat(inputMaxModalPerCoin.value)) : 0,
     maxSlippagePct: parseFloat(inputMaxSlippage.value) || 0.5,
     emergencySlPct: parseFloat(inputEmergencySl.value) || 10,
+    reorderWindowMinutes: inputReorderWindow ? (parseInt(inputReorderWindow.value) || 30) : 30,
     syncLeverage: checkSyncLeverage.checked,
+    reverseTrading: checkReverseTrading ? checkReverseTrading.checked : false,
     proxy: {
       enabled: checkProxyEnabled.checked,
       host: inputProxyHost.value.trim(),
@@ -2956,29 +3063,46 @@ window.syncAvgDown = async function(symbol, side) {
   }
 };
 
-window.syncEntry = async function(symbol, side) {
+window.syncEntry = async function(symbol, side, invert = false) {
   const skippedOrders = currentStatus?.slippageSkippedOrders || [];
   const item = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side);
+  const windowMinutes = Math.max(1, currentConfig?.reorderWindowMinutes || 30);
+  const windowMs = windowMinutes * 60 * 1000;
+
+  const targetSide = invert ? (side === 'LONG' ? 'SHORT' : 'LONG') : side;
+  const targetLabel = targetSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+  const leaderLabel = side === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+  const modeText = invert
+    ? (currentLang === 'en' ? '🔄 INVERSE / FADE LEADER' : '🔄 KEBALIKAN / FADE LEADER')
+    : (currentLang === 'en' ? '⚡ NORMAL / SAME AS LEADER' : '⚡ NORMAL / SEARAH LEADER');
 
   let detailExtra = '';
   if (item) {
     const elapsedMs = Date.now() - item.skippedAt;
-    const remainingMins = Math.max(1, Math.ceil((30 * 60 * 1000 - elapsedMs) / 60000));
+    const remainingMins = Math.max(1, Math.ceil((windowMs - elapsedMs) / 60000));
     detailExtra = currentLang === 'en'
-      ? `\n\n📌 Leader Entry: $${formatPrice(item.leaderEntryPrice)}\n📌 Realtime Mark: $${formatPrice(item.markPrice)} (Slippage: ${item.slippagePct.toFixed(2)}%)\n⏱️ Remaining Window: ${remainingMins} minutes (from 30m limit)\n`
-      : `\n\n📌 Entry Leader: $${formatPrice(item.leaderEntryPrice)}\n📌 Harga Mark Bursa: $${formatPrice(item.markPrice)} (Slippage: ${item.slippagePct.toFixed(2)}%)\n⏱️ Sisa Jendela Toleransi: ${remainingMins} menit (dari batas 30 menit)\n`;
+      ? `\n\n📌 Leader Entry: $${formatPrice(item.leaderEntryPrice)}\n📌 Realtime Mark: $${formatPrice(item.markPrice)} (Slippage: ${item.slippagePct.toFixed(2)}%)\n⏱️ Remaining Window: ${remainingMins} minutes (from ${windowMinutes}m limit)\n`
+      : `\n\n📌 Entry Leader: $${formatPrice(item.leaderEntryPrice)}\n📌 Harga Mark Bursa: $${formatPrice(item.markPrice)} (Slippage: ${item.slippagePct.toFixed(2)}%)\n⏱️ Sisa Jendela Toleransi: ${remainingMins} menit (dari batas ${windowMinutes} menit)\n`;
   }
 
   const confirmMsg = currentLang === 'en'
-    ? `⚡ Re-Order Confirmation for ${symbol} (${side})!${detailExtra}\nThis position was skipped by Slippage Guard. Do you want to execute and open this position now immediately at current market price?`
-    : `⚡ Konfirmasi Order Ulang untuk ${symbol} (${side})!${detailExtra}\nPosisi ini sebelumnya dilewati oleh batas Slippage Guard. Apakah Anda ingin mengeksekusi dan membuka posisi ini sekarang seketika pada harga pasar saat ini?`;
+    ? `⚡ Re-Order Confirmation for ${symbol}!\n` +
+      `👤 Leader Position: ${leaderLabel}\n` +
+      `🎯 YOUR EXECUTED POSITION: ${targetLabel} [${modeText}]` +
+      detailExtra +
+      `\nThis position was skipped by Slippage Guard. Do you want to execute and open this position now immediately at current market price?`
+    : `⚡ Konfirmasi Order Ulang untuk ${symbol}!\n` +
+      `👤 Posisi Leader: ${leaderLabel}\n` +
+      `🎯 POSISI AKUN ANDA: ${targetLabel} [${modeText}]` +
+      detailExtra +
+      `\nPosisi ini sebelumnya dilewati oleh batas Slippage Guard. Apakah Anda ingin mengeksekusi dan membuka posisi ini sekarang seketika pada harga pasar saat ini?`;
 
   if (!confirm(confirmMsg)) return;
 
   try {
     const res = await apiFetch('/api/positions/sync-entry', {
       method: 'POST',
-      body: JSON.stringify({ symbol, positionSide: side })
+      body: JSON.stringify({ symbol, positionSide: side, invert: Boolean(invert) })
     });
     const data = await res.json();
     if (data.success) {

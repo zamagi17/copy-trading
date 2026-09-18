@@ -6,11 +6,13 @@
   "binanceApiKey": "",
   "binanceSecretKey": "",
   "isTestnet": false,
-  "mode": "RATIO_EQUITY",
+  "mode": "FIXED_AMOUNT",
   "ratioMultiplier": 1,
-  "fixedAmountUsdt": 25,
+  "fixedAmountUsdt": 50,
   "maxModalPerCoin": 0,
   "maxSlippagePct": 0.5,
+  "reverseTrading": false,
+  "reorderWindowMinutes": 120,
   "syncLeverage": true,
   "emergencySlPct": 80,
   "pollingIntervalMs": 1500,
@@ -27,7 +29,8 @@
     "standbyIntervalSec": 60,
     "blockNewTrades": true,
     "smartReEntryEnabled": true,
-    "reEntryWindowMinutes": 30
+    "reEntryWindowMinutes": 30,
+    "autoAbortOnLeaderTrade": true
   },
   "proxy": {
     "enabled": false,
@@ -42,5 +45,12 @@
     "chatId": ""
   },
   "adminPassword": "admin123",
-  "jwtSecret": "copytrade_secret_key_change_me_987"
+  "jwtSecret": "copytrade_secret_key_change_me_987",
+  "dailySchedule": {
+    "enabled": false,
+    "startTime": "10:00",
+    "endTime": "18:30",
+    "action": "FULL_STOP",
+    "guardOpenPositions": true
+  }
 }
