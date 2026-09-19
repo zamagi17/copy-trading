@@ -3051,7 +3051,7 @@ export class CopyTradeEngine {
           }
         } else if (item.type === 'AVERAGING') {
           try {
-            const res = await this.syncAveragingDown(item.symbol, item.positionSide);
+            const res = await this.syncAveragingDown(item.symbol, item.positionSide, leaderPos);
             if (res.success) {
               this.slippageSkippedOrders.delete(posKey);
               this.saveVirtualState();
@@ -3075,12 +3075,16 @@ export class CopyTradeEngine {
   /**
    * Eksekusi manual untuk mengejar / sinkronisasi Averaging Down yang tertinggal
    */
-  async syncAveragingDown(symbol: string, positionSide: 'LONG' | 'SHORT'): Promise<{ success: boolean; message: string; addQty?: number }> {
+  async syncAveragingDown(
+    symbol: string,
+    positionSide: 'LONG' | 'SHORT',
+    leaderPosOverride?: LeadPosition
+  ): Promise<{ success: boolean; message: string; addQty?: number }> {
     const sym = symbol.toUpperCase();
     const posKey = `${sym}_${positionSide}`;
 
     // Cek posisi leader
-    const leaderPos = this.streamLeaderPositions.get(posKey) || this.lastLeaderPositions.get(posKey);
+    const leaderPos = leaderPosOverride || this.streamLeaderPositions.get(posKey) || this.lastLeaderPositions.get(posKey);
     if (!leaderPos) {
       throw new Error(`Posisi leader untuk ${sym} ${positionSide} tidak ditemukan.`);
     }
