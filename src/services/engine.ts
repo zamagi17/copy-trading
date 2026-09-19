@@ -46,6 +46,8 @@ export class CopyTradeEngine {
   public recentlyClosedCoins: Map<string, { symbol: string; positionSide: 'LONG' | 'SHORT'; closedAt: number; action: string }> = new Map();
   private closedTrades: ClosedTrade[] = [];
   private wsBroadcaster: ((type: string, payload: any) => void) | null = null;
+  private lastAccountFetchErrorTime: number = 0;
+  private lastAccountErrorMessage: string = '';
 
   constructor() {
     this.config = this.loadConfig();
@@ -453,7 +455,9 @@ export class CopyTradeEngine {
   }
 
   private initServices() {
-    binanceClient.configure(this.config.binanceApiKey, this.config.binanceSecretKey, this.config.isTestnet, this.config.proxy);
+    // binanceClient langsung terhubung ke fapi.binance.com via Cloudflare DoH (tanpa proxy residential)
+    // agar kuota proxy hemat 100% khusus untuk scraping www.binance.com dan bebas dari error 401/451
+    binanceClient.configure(this.config.binanceApiKey, this.config.binanceSecretKey, this.config.isTestnet);
     telegramService.configure(this.config.telegram);
   }
 
@@ -1457,7 +1461,12 @@ export class CopyTradeEngine {
         userPositions = await binanceClient.getOpenPositions();
         this.setLastUserAccount(bal, userPositions);
       } catch (e: any) {
-        this.log('WARN', `Gagal ambil saldo/posisi akun pengguna: ${e.message}`);
+        const now = Date.now();
+        if (!this.lastAccountFetchErrorTime || now - this.lastAccountFetchErrorTime > 30000 || this.lastAccountErrorMessage !== e.message) {
+          this.lastAccountFetchErrorTime = now;
+          this.lastAccountErrorMessage = e.message;
+          this.log('WARN', `Gagal ambil saldo/posisi akun pengguna: ${e.message}`);
+        }
         userBalanceInfo = this.lastUserBalance || {
           totalWalletBalance: 0,
           totalUnrealizedProfit: 0,
