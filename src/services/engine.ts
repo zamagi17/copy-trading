@@ -678,17 +678,26 @@ export class CopyTradeEngine {
     leaderSide: 'LONG' | 'SHORT',
     userPositionsMap: Map<string, UserPosition>
   ): { userPos: UserPosition | undefined; isReversed: boolean } {
-    const directKey = `${symbol}_${leaderSide}`;
+    const isReverseTrading = Boolean(this.config.reverseTrading);
+    // Jika Reverse Trading aktif, posisi yang kita cari di akun user adalah sisi kebalikan
+    const targetSide = isReverseTrading
+      ? (leaderSide === 'LONG' ? 'SHORT' : 'LONG')
+      : leaderSide;
+
+    // 1. Cek langsung posisi yang cocok dengan targetSide (Mendukung Hedge Mode: LONG & SHORT berdampingan)
+    const directKey = `${symbol}_${targetSide}`;
     const directPos = userPositionsMap.get(directKey);
     if (directPos && Math.abs(directPos.positionAmt) > 0) {
-      return { userPos: directPos, isReversed: false };
+      return { userPos: directPos, isReversed: isReverseTrading };
     }
 
-    const oppositeSide = leaderSide === 'LONG' ? 'SHORT' : 'LONG';
-    const oppositeKey = `${symbol}_${oppositeSide}`;
-    const oppositePos = userPositionsMap.get(oppositeKey);
-    if (oppositePos && Math.abs(oppositePos.positionAmt) > 0) {
-      return { userPos: oppositePos, isReversed: true };
+    // 2. Cek apakah ada posisi dengan mode One-Way bawaan (di mana positionSide adalah 'BOTH')
+    const bothPos = userPositionsMap.get(`${symbol}_BOTH`);
+    if (bothPos && Math.abs(bothPos.positionAmt) > 0) {
+      const bothSide = bothPos.positionAmt > 0 ? 'LONG' : 'SHORT';
+      if (bothSide === targetSide) {
+        return { userPos: bothPos, isReversed: isReverseTrading };
+      }
     }
 
     return { userPos: undefined, isReversed: false };
