@@ -154,13 +154,8 @@ const I18N = {
     hint_ratio_multiplier: 'Default: 1.0 (100% proporsional). Set 0.5 untuk separuh risiko.',
     label_fixed_amount: 'Nominal Tetap per Posisi (USDT):',
     hint_fixed_amount: 'Hanya berlaku jika Mode = Nominal Tetap.',
-    label_polling_interval: 'Kecepatan Pantau (Polling Interval):',
-    opt_poll_1000: '⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)',
-    opt_poll_1500: '⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)',
-    opt_poll_2000: '⚖️ 2.0 Detik (Seimbang & Hemat Kuota Proxy)',
-    opt_poll_2500: '🛡️ 2.5 Detik (Standar)',
-    opt_poll_3000: '🛡️ 3.0 Detik (Santai / Swing Trading)',
-    hint_polling_interval: 'Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).',
+    label_polling_interval: 'Kecepatan Pantau Manual (Detik):',
+    hint_polling_interval: 'Waktu jeda antar-request pengecekan transaksi leader ke Binance (dalam detik). Bebas diisi angka berapa pun (misal 1.8 atau 5.0 detik).',
     legend_safety: 'Safety Guard & Manajemen Risiko',
     label_max_modal: 'Safety Cap (Maksimal Margin per Koin USDT):',
     hint_max_modal: 'Isi 0 untuk NONAKTIF (Rekomendasi: 100% Murni Proporsional Rasio Binance). Isi nominal (misal 50) jika ingin membatasi margin maksimal per koin.',
@@ -426,13 +421,8 @@ const I18N = {
     hint_ratio_multiplier: 'Default: 1.0 (100% proportional). Set 0.5 for half risk.',
     label_fixed_amount: 'Fixed Amount per Position (USDT):',
     hint_fixed_amount: 'Only applies when Sizing Mode = Fixed Amount.',
-    label_polling_interval: 'Polling Speed (Refresh Rate):',
-    opt_poll_1000: '⚡ 1.0 Second (Super Fast / Demo Test)',
-    opt_poll_1500: '⚡ 1.5 Seconds (Optimal Balance - Recommended)',
-    opt_poll_2000: '⚖️ 2.0 Seconds (Balanced & Proxy Quota Saver)',
-    opt_poll_2500: '🛡️ 2.5 Seconds (Standard)',
-    opt_poll_3000: '🛡️ 3.0 Seconds (Relaxed / Swing Trading)',
-    hint_polling_interval: 'Frequency bot polls Binance for new leader transactions (in milliseconds).',
+    label_polling_interval: 'Manual Polling Interval (Seconds):',
+    hint_polling_interval: 'Interval between requests checking leader transactions on Binance (in seconds). Free custom input (e.g. 1.8 or 5.0 seconds).',
     legend_safety: 'Safety Guard & Risk Management',
     label_max_modal: 'Safety Cap (Max Margin per Coin USDT):',
     hint_max_modal: 'Set to 0 to DISABLE (Recommended: 100% Pure Binance Ratio). Enter an amount if you want to cap max margin per coin.',
@@ -765,6 +755,13 @@ const inputVirtualBalance = document.getElementById('inputVirtualBalance');
 const inputPortfolioId = document.getElementById('inputPortfolioId');
 const selectMode = document.getElementById('selectMode');
 const selectPollingInterval = document.getElementById('selectPollingInterval');
+const inputPollingInterval = document.getElementById('inputPollingInterval');
+
+window.setPollingPreset = function(sec) {
+  if (inputPollingInterval) {
+    inputPollingInterval.value = sec;
+  }
+};
 const inputRatioMultiplier = document.getElementById('inputRatioMultiplier');
 const inputFixedAmount = document.getElementById('inputFixedAmount');
 const inputMaxModalPerCoin = document.getElementById('inputMaxModalPerCoin');
@@ -2167,7 +2164,12 @@ function openSettingsModal() {
   inputVirtualBalance.value = currentConfig.virtualBalanceUsdt ?? 100;
   inputPortfolioId.value = currentConfig.portfolioId || '';
   selectMode.value = currentConfig.mode || 'RATIO_EQUITY';
-  if (selectPollingInterval) selectPollingInterval.value = currentConfig.pollingIntervalMs || 1500;
+  if (inputPollingInterval) {
+    const sec = ((currentConfig.pollingIntervalMs || 1800) / 1000);
+    inputPollingInterval.value = Number.isInteger(sec) ? sec.toString() : sec.toFixed(1);
+  } else if (selectPollingInterval) {
+    selectPollingInterval.value = currentConfig.pollingIntervalMs || 1800;
+  }
   inputRatioMultiplier.value = currentConfig.ratioMultiplier ?? 1.0;
   inputFixedAmount.value = currentConfig.fixedAmountUsdt ?? 25;
   inputMaxModalPerCoin.value = currentConfig.maxModalPerCoin ?? 0;
@@ -2449,7 +2451,15 @@ async function saveSettings() {
     virtualBalanceUsdt: parseFloat(inputVirtualBalance.value) || 100,
     portfolioId: inputPortfolioId.value.trim(),
     mode: selectMode.value,
-    pollingIntervalMs: parseInt(selectPollingInterval.value) || 1500,
+    pollingIntervalMs: (() => {
+      if (inputPollingInterval) {
+        const parsed = parseFloat(inputPollingInterval.value);
+        if (!isNaN(parsed) && parsed >= 0.5) {
+          return Math.round(parsed * 1000);
+        }
+      }
+      return selectPollingInterval ? (parseInt(selectPollingInterval.value) || 1800) : 1800;
+    })(),
     adaptivePolling: {
       enabled: checkAdaptivePolling ? checkAdaptivePolling.checked : true,
       dawnIntervalMs: selectDawnInterval ? parseInt(selectDawnInterval.value) : 1000,

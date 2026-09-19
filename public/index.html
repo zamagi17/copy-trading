@@ -449,18 +449,23 @@
             </div>
           </div>
 
-          <!-- Static Polling Selection (shown when adaptive is OFF) -->
+          <!-- Custom Static Polling Input (shown when adaptive is OFF) -->
           <div class="form-row" id="staticPollingRow">
             <div class="form-field">
-              <label for="selectPollingInterval" data-i18n="label_polling_interval">Kecepatan Pantau Manual (Polling Interval):</label>
-              <select id="selectPollingInterval">
-                <option value="1000" data-i18n="opt_poll_1000">⚡ 1.0 Detik (Super Cepat / Uji Coba Demo)</option>
-                <option value="1500" data-i18n="opt_poll_1500">⚡ 1.5 Detik (Optimal Seimbang - Rekomendasi)</option>
-                <option value="2000" data-i18n="opt_poll_2000">⚖️ 2.0 Detik (Seimbang & Hemat Kuota Proxy)</option>
-                <option value="2500" data-i18n="opt_poll_2500">🛡️ 2.5 Detik (Standar)</option>
-                <option value="3000" data-i18n="opt_poll_3000">🛡️ 3.0 Detik (Santai / Swing Trading)</option>
-              </select>
-              <small data-i18n="hint_polling_interval">Frekuensi bot mengecek transaksi baru leader ke Binance (dalam milidetik).</small>
+              <label for="inputPollingInterval" data-i18n="label_polling_interval">Kecepatan Pantau Manual (Detik):</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="number" id="inputPollingInterval" step="0.1" min="0.5" max="60" value="1.8" placeholder="1.8" style="flex: 1; font-weight: 700; font-size: 1.05rem;">
+                <span style="font-weight: 700; color: #38bdf8; font-size: 0.95rem; padding: 6px 12px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px;">Detik</span>
+              </div>
+              <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setPollingPreset(1.0)">⚡ 1.0s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setPollingPreset(1.5)">⚡ 1.5s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; border-radius: 6px; cursor: pointer; font-weight: 700;" onclick="setPollingPreset(1.8)">⭐ 1.8s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setPollingPreset(2.5)">🛡️ 2.5s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setPollingPreset(3.0)">⚖️ 3.0s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setPollingPreset(5.0)">💰 5.0s (Hemat)</button>
+              </div>
+              <small data-i18n="hint_polling_interval">Waktu jeda antar-request pengecekan transaksi leader ke Binance (dalam detik). Bebas diisi angka berapa pun (misal 1.8 atau 5.0 detik).</small>
             </div>
           </div>
 
@@ -1097,7 +1102,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.6"></script>
+  <script src="app.js?v=2.7"></script>
   <script>
     lucide.createIcons();
   </script>
