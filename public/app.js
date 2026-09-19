@@ -1753,31 +1753,34 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       userRoiDisplay = formatPercent(userRoi, true);
     }
 
-    let leaderRoiDisplay = '';
-    if (lp && leaderMargin > 0 && typeof lp.unrealizedProfit === 'number') {
-      const leaderRoi = (lp.unrealizedProfit / leaderMargin) * 100;
-      const leaderRoiColor = leaderRoi > 0.005 ? 'text-green' : leaderRoi < -0.005 ? 'text-red' : 'text-muted';
-      leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${formatPercent(leaderRoi, true)}</small><br/>`;
-    } else if (leaderMargin > 0 && leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
-      const pnl = side === 'LONG'
+    // Hitung Floating PnL & ROI Leader secara dinamis berbasis Realtime Mark Price
+    let leaderPnl = 0;
+    let hasLeaderPnl = false;
+    if (leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
+      leaderPnl = side === 'LONG'
         ? (markPrice - leaderEntryPrice) * leaderAmount
         : (leaderEntryPrice - markPrice) * leaderAmount;
-      const leaderRoi = (pnl / leaderMargin) * 100;
+      hasLeaderPnl = true;
+    } else if (lp && typeof lp.unrealizedProfit === 'number') {
+      leaderPnl = lp.unrealizedProfit;
+      hasLeaderPnl = true;
+    }
+
+    let leaderRoi = 0;
+    if (leaderMargin > 0 && hasLeaderPnl) {
+      leaderRoi = (leaderPnl / leaderMargin) * 100;
+    }
+
+    let leaderRoiDisplay = '';
+    if (leaderMargin > 0 && hasLeaderPnl) {
       const leaderRoiColor = leaderRoi > 0.005 ? 'text-green' : leaderRoi < -0.005 ? 'text-red' : 'text-muted';
       leaderRoiDisplay = `<small class="${leaderRoiColor}">L: ${formatPercent(leaderRoi, true)}</small><br/>`;
     }
 
     let leaderPnlDisplay = '';
-    if (lp && typeof lp.unrealizedProfit === 'number') {
-      const pnl = lp.unrealizedProfit;
-      const pnlColor = pnl > 0.001 ? 'text-green' : pnl < -0.001 ? 'text-red' : 'text-muted';
-      leaderPnlDisplay = `<span class="${pnlColor}">L: ${formatCurrency(pnl, true)}</span><br/>`;
-    } else if (leaderAmount > 0 && leaderEntryPrice > 0 && markPrice > 0) {
-      const pnl = side === 'LONG'
-        ? (markPrice - leaderEntryPrice) * leaderAmount
-        : (leaderEntryPrice - markPrice) * leaderAmount;
-      const pnlColor = pnl > 0.001 ? 'text-green' : pnl < -0.001 ? 'text-red' : 'text-muted';
-      leaderPnlDisplay = `<span class="${pnlColor}">L: ${formatCurrency(pnl, true)}</span><br/>`;
+    if (hasLeaderPnl && (leaderAmount > 0 || leaderMargin > 0)) {
+      const pnlColor = leaderPnl > 0.001 ? 'text-green' : leaderPnl < -0.001 ? 'text-red' : 'text-muted';
+      leaderPnlDisplay = `<span class="${pnlColor}">L: ${formatCurrency(leaderPnl, true)}</span><br/>`;
     }
 
     // Hitung Total Slippage antara Entry Leader dan Entry Anda

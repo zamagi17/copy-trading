@@ -592,6 +592,12 @@ export class CopyTradeEngine {
                 if (mp > 0) lp.markPrice = mp;
               } catch {}
             }
+            if (lp.markPrice > 0 && lp.entryPrice > 0 && lp.amount > 0) {
+              lp.unrealizedProfit = lp.positionSide === 'LONG'
+                ? (lp.markPrice - lp.entryPrice) * lp.amount
+                : (lp.entryPrice - lp.markPrice) * lp.amount;
+              lp.notional = lp.amount * lp.markPrice;
+            }
           }
         }
         if (this.wsBroadcaster) {
@@ -2027,10 +2033,20 @@ export class CopyTradeEngine {
     // AUTO-SNIPER PULLBACK: Periksa antrean order tertahan yang harganya telah pullback ke level entry leader
     await this.checkAutoSniperPullback(currentLeaderMap, userBalance, userPositionsMap);
 
-    // Pasang avgCount ke posisi leader dan user sebelum broadcast
+    // Pasang avgCount dan sinkronkan live Mark Price & Floating PnL ke posisi leader sebelum broadcast
     for (const lp of currentLeaderPositions) {
       const counts = this.positionAvgCounts.get(`${lp.symbol}_${lp.positionSide}`);
       lp.avgCount = counts?.leader || 0;
+      if (!lp.markPrice || lp.markPrice <= 0) {
+        const up = userPositionsMap.get(`${lp.symbol}_${lp.positionSide}`);
+        if (up && up.markPrice > 0) lp.markPrice = up.markPrice;
+      }
+      if (lp.markPrice > 0 && lp.entryPrice > 0 && lp.amount > 0) {
+        lp.unrealizedProfit = lp.positionSide === 'LONG'
+          ? (lp.markPrice - lp.entryPrice) * lp.amount
+          : (lp.entryPrice - lp.markPrice) * lp.amount;
+        lp.notional = lp.amount * lp.markPrice;
+      }
     }
     for (const up of userPositions) {
       const counts = this.positionAvgCounts.get(`${up.symbol}_${up.positionSide}`);

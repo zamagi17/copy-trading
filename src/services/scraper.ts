@@ -147,8 +147,13 @@ export class CopyTradeScraper {
 
     try {
       const client = await this.createClient(proxy);
-      const url = `/bapi/futures/v1/friendly/future/copy-trade/lead-data/positions?portfolioId=${portfolioId.trim()}`;
-      const res = await client.get(url);
+      const url = `/bapi/futures/v1/friendly/future/copy-trade/lead-data/positions?portfolioId=${portfolioId.trim()}&_t=${Date.now()}`;
+      const res = await client.get(url, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+      });
 
       const root = res.data;
       if (!root || (root.code && root.code !== '000000')) {
@@ -226,6 +231,11 @@ export class CopyTradeScraper {
         startTime,
         endTime: now,
         pageSize,
+      }, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
       });
 
       const root = res.data;
