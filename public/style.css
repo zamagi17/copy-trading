@@ -97,19 +97,31 @@ body {
 /* Navbar */
 .navbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 22px;
   background: rgba(15, 20, 34, 0.85);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-card);
   border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  contain: layout style;
+}
+
+.navbar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-shrink: 0;
 }
 
 .logo-box {
@@ -121,6 +133,7 @@ body {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+  flex-shrink: 0;
 }
 
 .icon-brand {
@@ -146,10 +159,64 @@ body {
   display: block;
 }
 
+.navbar-top-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.nav-vertical-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 2px;
+}
+
+.btn-header-tool {
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 10px;
+  height: 36px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Navbar Actions Toolbar Row */
+.navbar-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.navbar-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.navbar-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .nav-controls {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 /* Engine Status Dot & Badge */
@@ -164,6 +231,8 @@ body {
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .status-dot {
@@ -1125,31 +1194,63 @@ button, .btn, .custom-checkbox, select, input {
     gap: 12px;
     padding: 12px 14px;
   }
+  .navbar-top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
   .brand {
     justify-content: space-between;
     width: 100%;
   }
-  .nav-controls {
+  .navbar-top-controls {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     width: 100%;
+    justify-content: space-between;
   }
-  .nav-controls .engine-badge {
+  .navbar-top-controls .engine-badge {
     flex: 1 1 calc(50% - 8px);
     justify-content: center;
     padding: 7px 10px;
     font-size: 0.72rem;
   }
-  .nav-controls .btn {
+  .navbar-top-controls .btn-header-tool {
     flex: 1 1 calc(50% - 8px);
-    min-height: 40px;
+    min-height: 38px;
     justify-content: center;
     font-size: 0.82rem;
   }
-  .nav-controls #btnPanicClose {
-    flex: 1 1 100%;
-    order: 10;
+  .nav-vertical-divider {
+    display: none;
+  }
+  .navbar-actions-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding-top: 10px;
+  }
+  .navbar-actions-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+  .navbar-actions-left .btn {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    font-size: 0.85rem;
+  }
+  .navbar-actions-right {
+    width: 100%;
+  }
+  .navbar-actions-right #btnPanicClose {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    font-size: 0.85rem;
   }
 
   /* Cards */

@@ -21,7 +21,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <link rel="stylesheet" href="style.css?v=2.3">
+  <link rel="stylesheet" href="style.css?v=2.4">
 </head>
 <body>
   <!-- Background Glow FX -->
@@ -31,79 +31,95 @@
   <div class="app-container">
     <!-- Navbar Header -->
     <header class="navbar">
-      <div class="brand">
-        <div class="logo-box">
-          <i data-lucide="repeat" class="icon-brand"></i>
+      <!-- Top Row: Brand & System Utilities / Status -->
+      <div class="navbar-top">
+        <div class="brand">
+          <div class="logo-box">
+            <i data-lucide="repeat" class="icon-brand"></i>
+          </div>
+          <div>
+            <h1 class="brand-title">BINANCE COPY TRADER</h1>
+            <span class="brand-subtitle" data-i18n="brand_subtitle">Proportional Ratio & Residential Proxy Engine</span>
+          </div>
         </div>
-        <div>
-          <h1 class="brand-title">BINANCE COPY TRADER</h1>
-          <span class="brand-subtitle" data-i18n="brand_subtitle">Proportional Ratio & Residential Proxy Engine</span>
+
+        <div class="navbar-top-controls">
+          <!-- Status Badges -->
+          <div class="engine-badge badge-simulation" id="simBadge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; white-space: nowrap;">
+            <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>
+            <span id="simBadgeText">SIMULASI (FREE TRIAL)</span>
+          </div>
+
+          <div class="engine-badge" id="engineStatusBadge" style="white-space: nowrap;">
+            <span class="status-dot dot-idle" id="statusDot"></span>
+            <span id="statusText">STANDBY</span>
+          </div>
+
+          <div class="engine-badge badge-holiday" id="holidayBadge" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap;" onclick="handleHolidayBadgeClick()" title="Status Libur Akhir Pekan">
+            <i data-lucide="palmtree" id="holidayBadgeIcon" style="width: 14px; height: 14px;"></i>
+            <span id="holidayBadgeText">LIBUR AKHIR PEKAN</span>
+          </div>
+
+          <div class="engine-badge badge-sleep" id="scheduleBadge" style="display: none; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.4); color: #c4b5fd; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap;" onclick="openScheduleModal()" title="Klik untuk atur jadwal istirahat">
+            <i data-lucide="moon" style="width: 14px; height: 14px;"></i>
+            <span id="scheduleBadgeText">ISTIRAHAT</span>
+          </div>
+
+          <div class="nav-vertical-divider"></div>
+
+          <!-- Language Toggle -->
+          <div class="lang-toggle-box" id="langToggleBox" onclick="toggleLanguage()" title="Ganti Bahasa / Switch Language" role="button" tabindex="0">
+            <i data-lucide="languages" class="lang-icon"></i>
+            <span class="lang-badge active" id="langBadgeId">ID</span>
+            <span class="lang-divider">|</span>
+            <span class="lang-badge" id="langBadgeEn">EN</span>
+          </div>
+
+          <!-- Audio Sound Alert Toggle -->
+          <div class="sound-toggle-box" id="soundToggleBox" onclick="toggleSoundAlert()" title="Suara Notifikasi: Aktif" data-i18n-title="sound_alert_title_on" role="button" tabindex="0">
+            <i data-lucide="bell" id="soundToggleIcon" class="sound-icon"></i>
+          </div>
+
+          <div class="nav-vertical-divider"></div>
+
+          <!-- Settings & Logout -->
+          <button class="btn btn-secondary btn-header-tool" id="btnOpenSettings" onclick="openSettingsModal()" title="Buka Pengaturan Bot">
+            <i data-lucide="settings" class="btn-icon"></i>
+            <span data-i18n="btn_settings">Pengaturan</span>
+          </button>
+
+          <button class="btn btn-ghost btn-header-tool" id="btnLogout" onclick="logout()" title="Kunci / Logout" data-i18n-title="btn_logout_title">
+            <i data-lucide="log-out" class="btn-icon"></i>
+            <span data-i18n="btn_logout">Logout</span>
+          </button>
         </div>
       </div>
 
-      <div class="nav-controls">
-        <!-- Language Toggle -->
-        <div class="lang-toggle-box" id="langToggleBox" onclick="toggleLanguage()" title="Ganti Bahasa / Switch Language" role="button" tabindex="0">
-          <i data-lucide="languages" class="lang-icon"></i>
-          <span class="lang-badge active" id="langBadgeId">ID</span>
-          <span class="lang-divider">|</span>
-          <span class="lang-badge" id="langBadgeEn">EN</span>
+      <!-- Bottom Row: Trading Actions Toolbar -->
+      <div class="navbar-actions-row">
+        <div class="navbar-actions-left">
+          <button class="btn btn-success" id="btnToggleEngine" onclick="toggleEngine()">
+            <i data-lucide="play" class="btn-icon" id="toggleIcon"></i>
+            <span id="toggleBtnText">Mulai Copy Trade</span>
+          </button>
+
+          <button class="btn btn-purple" id="btnOpenSchedule" onclick="openScheduleModal()" title="Atur Jadwal Istirahat / Auto Pause Polling" style="background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.45); color: #c4b5fd;">
+            <i data-lucide="calendar-clock" class="btn-icon"></i>
+            <span data-i18n="btn_schedule">Jadwal Istirahat</span>
+          </button>
+
+          <button class="btn btn-warning" id="btnOpenTestTrade" onclick="openTestTradeModal()" title="Uji Coba Eksekusi Order" data-i18n-title="btn_test_trade_title">
+            <i data-lucide="flask-conical" class="btn-icon"></i>
+            <span data-i18n="btn_test_trade">Uji Eksekusi</span>
+          </button>
         </div>
 
-        <!-- Audio Sound Alert Toggle -->
-        <div class="sound-toggle-box" id="soundToggleBox" onclick="toggleSoundAlert()" title="Suara Notifikasi: Aktif" data-i18n-title="sound_alert_title_on" role="button" tabindex="0">
-          <i data-lucide="bell" id="soundToggleIcon" class="sound-icon"></i>
+        <div class="navbar-actions-right">
+          <button class="btn btn-danger" id="btnPanicClose" onclick="confirmPanicClose()" title="Tutup paksa semua posisi aktif">
+            <i data-lucide="alert-octagon" class="btn-icon"></i>
+            <span data-i18n="btn_panic_close">Panic Close All</span>
+          </button>
         </div>
-
-        <div class="engine-badge badge-simulation" id="simBadge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
-          <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>
-          <span id="simBadgeText">SIMULASI (FREE TRIAL)</span>
-        </div>
-
-        <div class="engine-badge" id="engineStatusBadge">
-          <span class="status-dot dot-idle" id="statusDot"></span>
-          <span id="statusText">STANDBY</span>
-        </div>
-
-        <div class="engine-badge badge-holiday" id="holidayBadge" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer;" onclick="handleHolidayBadgeClick()" title="Status Libur Akhir Pekan">
-          <i data-lucide="palmtree" id="holidayBadgeIcon" style="width: 14px; height: 14px;"></i>
-          <span id="holidayBadgeText">LIBUR AKHIR PEKAN</span>
-        </div>
-
-        <div class="engine-badge badge-sleep" id="scheduleBadge" style="display: none; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.4); color: #c4b5fd; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; cursor: pointer;" onclick="openScheduleModal()" title="Klik untuk atur jadwal istirahat">
-          <i data-lucide="moon" style="width: 14px; height: 14px;"></i>
-          <span id="scheduleBadgeText">ISTIRAHAT</span>
-        </div>
-
-        <button class="btn btn-purple" id="btnOpenSchedule" onclick="openScheduleModal()" title="Atur Jadwal Istirahat / Auto Pause Polling" style="background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.45); color: #c4b5fd;">
-          <i data-lucide="calendar-clock" class="btn-icon"></i>
-          <span data-i18n="btn_schedule">Jadwal Istirahat</span>
-        </button>
-
-        <button class="btn btn-success" id="btnToggleEngine" onclick="toggleEngine()">
-          <i data-lucide="play" class="btn-icon" id="toggleIcon"></i>
-          <span id="toggleBtnText">Mulai Copy Trade</span>
-        </button>
-
-        <button class="btn btn-warning" id="btnOpenTestTrade" onclick="openTestTradeModal()" title="Uji Coba Eksekusi Order" data-i18n-title="btn_test_trade_title">
-          <i data-lucide="flask-conical" class="btn-icon"></i>
-          <span data-i18n="btn_test_trade">Uji Eksekusi</span>
-        </button>
-
-        <button class="btn btn-danger" id="btnPanicClose" onclick="confirmPanicClose()">
-          <i data-lucide="alert-octagon" class="btn-icon"></i>
-          <span data-i18n="btn_panic_close">Panic Close All</span>
-        </button>
-
-        <button class="btn btn-secondary" id="btnOpenSettings" onclick="openSettingsModal()">
-          <i data-lucide="settings" class="btn-icon"></i>
-          <span data-i18n="btn_settings">Pengaturan</span>
-        </button>
-
-        <button class="btn btn-ghost" id="btnLogout" onclick="logout()" title="Kunci / Logout" data-i18n-title="btn_logout_title">
-          <i data-lucide="log-out" class="btn-icon"></i>
-          <span data-i18n="btn_logout">Logout</span>
-        </button>
       </div>
     </header>
 
