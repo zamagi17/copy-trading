@@ -551,6 +551,34 @@
               </div>
             </div>
           </div>
+
+          <!-- Smart Zero-Position Idle Standby (Hemat Proxy saat 0 Posisi) -->
+          <div class="form-row" id="idleStandbyRow" style="margin-top: 14px; padding: 14px 16px; background: rgba(56, 189, 248, 0.05); border: 1px dashed rgba(56, 189, 248, 0.3); border-radius: 10px;">
+            <div class="form-field checkbox-field" style="margin-bottom: 0;">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkIdleStandby" checked onchange="toggleIdleStandbyInputs()">
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #38bdf8;" data-i18n="check_idle_standby">Aktifkan Jeda Hemat saat 0 Posisi (Smart Idle Standby)</span>
+              </label>
+              <small data-i18n="hint_idle_standby" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px; line-height: 1.45;">
+                Saat tidak ada posisi aktif di Leader & User, bot otomatis melambat ke jeda santai untuk menghemat kuota proxy hingga 65%. Begitu Leader buka posisi, bot langsung kilat kembali ke kecepatan normal!
+              </small>
+            </div>
+            
+            <div id="idleStandbyConfigArea" style="margin-left: 28px; margin-top: 10px;">
+              <label for="inputIdleStandbyInterval" style="font-size: 0.85rem; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;" data-i18n="label_idle_interval">Jeda Santai saat 0 Posisi (Detik):</label>
+              <div style="display: flex; gap: 8px; align-items: center; max-width: 280px;">
+                <input type="number" id="inputIdleStandbyInterval" step="0.5" min="1.0" max="60" value="5.0" placeholder="5.0" style="flex: 1; font-weight: 700; font-size: 1.05rem;">
+                <span style="font-weight: 700; color: #38bdf8; font-size: 0.95rem; padding: 6px 12px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px;">Detik</span>
+              </div>
+              <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setIdlePreset(3.0)">⚡ 3.0s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; border-radius: 6px; cursor: pointer; font-weight: 700;" onclick="setIdlePreset(5.0)">⭐ 5.0s (Disarankan)</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setIdlePreset(8.0)">🛡️ 8.0s</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setIdlePreset(10.0)">💰 10.0s (Ekstra Hemat)</button>
+              </div>
+            </div>
+          </div>
         </fieldset>
 
         <!-- Tab: Weekend Holiday (Waktu WIB UTC+7) -->
@@ -1102,7 +1130,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.7"></script>
+  <script src="app.js?v=2.8"></script>
   <script>
     lucide.createIcons();
   </script>

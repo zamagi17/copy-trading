@@ -243,6 +243,9 @@ const I18N = {
     label_session_interval: 'Kecepatan Polling:',
     badge_current_wib: 'Waktu WIB:',
     spec_polling_adaptive_prefix: 'Adaptif WIB',
+    check_idle_standby: 'Aktifkan Jeda Hemat saat 0 Posisi (Smart Idle Standby)',
+    hint_idle_standby: 'Saat tidak ada posisi aktif di Leader & User, bot otomatis melambat ke jeda santai untuk menghemat kuota proxy hingga 65%. Begitu Leader buka posisi, bot langsung kilat kembali ke kecepatan normal!',
+    label_idle_interval: 'Jeda Santai saat 0 Posisi (Detik):',
 
     legend_weekend_break: 'Opsi Libur Akhir Pekan (Waktu WIB UTC+7)',
     check_weekend_break: 'Aktifkan Libur Sabtu & Minggu (Waktu WIB UTC+7)',
@@ -510,6 +513,9 @@ const I18N = {
     label_session_interval: 'Polling Speed:',
     badge_current_wib: 'Current WIB Time:',
     spec_polling_adaptive_prefix: 'Adaptive WIB',
+    check_idle_standby: 'Enable Smart Zero-Position Idle Standby (Proxy Saver)',
+    hint_idle_standby: 'When there are 0 active positions on both Leader and User, the bot automatically slows down to save proxy bandwidth by up to 65%. The moment Leader opens a trade, it instantly accelerates back to full speed!',
+    label_idle_interval: 'Idle Standby Interval (Seconds):',
 
     legend_weekend_break: 'Weekend Holiday Mode (WIB Time UTC+7)',
     check_weekend_break: 'Enable Saturday & Sunday Holiday (WIB Time UTC+7)',
@@ -760,6 +766,22 @@ const inputPollingInterval = document.getElementById('inputPollingInterval');
 window.setPollingPreset = function(sec) {
   if (inputPollingInterval) {
     inputPollingInterval.value = sec;
+  }
+};
+
+const checkIdleStandby = document.getElementById('checkIdleStandby');
+const inputIdleStandbyInterval = document.getElementById('inputIdleStandbyInterval');
+const idleStandbyConfigArea = document.getElementById('idleStandbyConfigArea');
+
+function toggleIdleStandbyInputs() {
+  if (!idleStandbyConfigArea) return;
+  idleStandbyConfigArea.style.display = checkIdleStandby?.checked ? 'block' : 'none';
+}
+window.toggleIdleStandbyInputs = toggleIdleStandbyInputs;
+
+window.setIdlePreset = function(sec) {
+  if (inputIdleStandbyInterval) {
+    inputIdleStandbyInterval.value = Number.isInteger(sec) ? sec.toString() : sec.toFixed(1);
   }
 };
 const inputRatioMultiplier = document.getElementById('inputRatioMultiplier');
@@ -1215,7 +1237,10 @@ function updateEngineUI(status) {
     if (specPolling) {
       const sfx = currentLang === 'en' ? 's' : 'Detik';
       const sec = (status.pollingInfo.currentIntervalMs / 1000).toFixed(1);
-      if (status.pollingInfo.isAdaptive) {
+      if (status.pollingInfo.isIdleStandby) {
+        specPolling.innerText = `💤 ~${sec}${sfx} (Standby)`;
+        specPolling.title = `Mode Hemat 0 Posisi: Leader & User tidak ada posisi aktif. Polling diperlambat ke ~${sec}s untuk menghemat kuota proxy.`;
+      } else if (status.pollingInfo.isAdaptive) {
         const shortSession = status.pollingInfo.sessionName.split(' ')[0];
         specPolling.innerText = `⚡ ~${sec}${sfx} (${shortSession})`;
         specPolling.title = `Jadwal Sesi Aktif: ${status.pollingInfo.sessionName} (${status.pollingInfo.wibTimeStr}) - Interval: ~${sec} detik`;
@@ -2206,6 +2231,14 @@ function openSettingsModal() {
   if (selectAfternoonInterval) selectAfternoonInterval.value = adp?.afternoonIntervalMs || 3000;
   if (selectNightInterval) selectNightInterval.value = adp?.nightIntervalMs || 1500;
 
+  // Smart Idle Standby
+  const isb = currentConfig.idleStandby;
+  if (checkIdleStandby) checkIdleStandby.checked = isb?.enabled !== false;
+  if (inputIdleStandbyInterval) {
+    const isbSec = isb?.idleIntervalSec ?? 5.0;
+    inputIdleStandbyInterval.value = Number.isInteger(isbSec) ? isbSec.toString() : isbSec.toFixed(1);
+  }
+
   // Weekend Break (Waktu China CST)
   const wb = currentConfig.weekendBreak;
   if (checkWeekendBreak) checkWeekendBreak.checked = wb?.enabled ?? true;
@@ -2220,6 +2253,7 @@ function openSettingsModal() {
   toggleProxyInputs();
   toggleTelegramInputs();
   toggleAdaptivePollingInputs();
+  toggleIdleStandbyInputs();
   toggleWeekendBreakInputs();
   settingsModal.style.display = 'flex';
 }
@@ -2466,6 +2500,18 @@ async function saveSettings() {
       morningIntervalMs: selectMorningInterval ? parseInt(selectMorningInterval.value) : 1800,
       afternoonIntervalMs: selectAfternoonInterval ? parseInt(selectAfternoonInterval.value) : 3000,
       nightIntervalMs: selectNightInterval ? parseInt(selectNightInterval.value) : 1500,
+    },
+    idleStandby: {
+      enabled: checkIdleStandby ? checkIdleStandby.checked : true,
+      idleIntervalSec: (() => {
+        if (inputIdleStandbyInterval) {
+          const parsed = parseFloat(inputIdleStandbyInterval.value);
+          if (!isNaN(parsed) && parsed >= 1.0) {
+            return parsed;
+          }
+        }
+        return 5.0;
+      })(),
     },
     weekendBreak: {
       enabled: checkWeekendBreak ? checkWeekendBreak.checked : true,

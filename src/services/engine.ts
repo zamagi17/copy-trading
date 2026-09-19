@@ -375,8 +375,17 @@ export class CopyTradeEngine {
     if (parsed.fixedAmountUsdt === undefined) parsed.fixedAmountUsdt = 25.0;
     if (parsed.maxModalPerCoin === undefined) parsed.maxModalPerCoin = 0;
     if (parsed.maxSlippagePct === undefined) parsed.maxSlippagePct = 0.5;
-    if (parsed.syncLeverage === undefined) parsed.syncLeverage = true;
-    if (parsed.emergencySlPct === undefined) parsed.emergencySlPct = 10.0;
+    if (!parsed.idleStandby) {
+      parsed.idleStandby = {
+        enabled: true,
+        idleIntervalSec: 5.0,
+      };
+    } else {
+      if (parsed.idleStandby.enabled === undefined) parsed.idleStandby.enabled = true;
+      if (!parsed.idleStandby.idleIntervalSec || isNaN(Number(parsed.idleStandby.idleIntervalSec))) {
+        parsed.idleStandby.idleIntervalSec = 5.0;
+      }
+    }
     if (!parsed.proxy) parsed.proxy = { enabled: false, host: '', port: 823, username: '', password: '' };
     return parsed as AppConfig;
   }
@@ -1083,9 +1092,16 @@ export class CopyTradeEngine {
     };
   }
 
-  getCurrentPollingInfo(): PollingStatusInfo {
+  getCurrentPollingInfo(leaderPositionsCount?: number, userPositionsCount?: number): PollingStatusInfo {
     const times = this.getTimes();
     const weekendStatus = this.getWeekendBreakStatus();
+
+    const userPosCount = userPositionsCount !== undefined
+      ? userPositionsCount
+      : (this.config.paperTrading ? this.virtualPositions.size : (this.lastUserPositions?.length ?? this.lastUserPositionsCount));
+    const leaderPosCount = leaderPositionsCount !== undefined
+      ? leaderPositionsCount
+      : this.lastLeaderPositions.size;
 
     // 0. Prioritas Utama: Jika terdapat antrean Auto-Sniper yang sedang mengintai pullback harga,
     // jangan gunakan standby lambat (60s). Selalu polling cepat (1-1.5s) agar momentum pullback diskon tidak hilang!
@@ -1098,6 +1114,7 @@ export class CopyTradeEngine {
         wibTimeStr: times.wibTimeStr,
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: weekendStatus.isHolidayActive,
+        isIdleStandby: false,
       };
     }
 
@@ -1111,6 +1128,7 @@ export class CopyTradeEngine {
         wibTimeStr: times.wibTimeStr,
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: false,
+        isIdleStandby: false,
       };
     }
 
@@ -1125,10 +1143,29 @@ export class CopyTradeEngine {
         wibTimeStr: times.wibTimeStr,
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: true,
+        isIdleStandby: false,
       };
     }
 
-    // 2. Jika Polling Adaptif tidak aktif
+    // 3. Jeda Hemat Saat 0 Posisi (Zero-Position Smart Idle Standby)
+    // Jika tidak ada posisi terbuka di Leader maupun User, dan tidak ada antrean Auto-Sniper,
+    // perlambat polling ke idleIntervalSec (default: 5.0s) untuk menghemat kuota proxy hingga ~65%!
+    if (this.config.idleStandby?.enabled !== false && leaderPosCount === 0 && userPosCount === 0) {
+      const idleSec = Math.max(1, Number(this.config.idleStandby?.idleIntervalSec) || 5.0);
+      const idleMs = Math.round(idleSec * 1000);
+      return {
+        isAdaptive: false,
+        currentIntervalMs: idleMs,
+        sessionName: `💤 Standby 0 Posisi (${idleSec.toFixed(1)}s Hemat Kuota)`,
+        sessionKey: 'idle_standby',
+        wibTimeStr: times.wibTimeStr,
+        cstTimeStr: times.cstTimeStr,
+        isWeekendHoliday: false,
+        isIdleStandby: true,
+      };
+    }
+
+    // 4. Jika Polling Adaptif tidak aktif
     if (!this.config.adaptivePolling?.enabled) {
       return {
         isAdaptive: false,
@@ -1138,6 +1175,7 @@ export class CopyTradeEngine {
         wibTimeStr: times.wibTimeStr,
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: false,
+        isIdleStandby: false,
       };
     }
 
@@ -1219,10 +1257,11 @@ export class CopyTradeEngine {
       userPositionsCount: userPositions.length,
       activePairs: Array.from(this.lastLeaderPositions.keys()),
       lastError: this.lastError,
-      pollingInfo: this.getCurrentPollingInfo(),
+      pollingInfo: this.getCurrentPollingInfo(this.lastLeaderPositions.size, count),
       weekendBreak: weekendBreakStatus,
       dailySchedule: this.getDailyScheduleStatus(count),
       slippageSkippedOrders: Array.from(this.slippageSkippedOrders.values()),
+      isIdleStandby: Boolean(this.getCurrentPollingInfo(this.lastLeaderPositions.size, count).isIdleStandby),
     };
   }
 
@@ -1332,7 +1371,8 @@ export class CopyTradeEngine {
     }
 
     // Interval acak (jitter ~15%) untuk menghindari ritme kaku dan deteksi bot
-    const pollInfo = this.getCurrentPollingInfo();
+    const userPosCount = this.config.paperTrading ? this.virtualPositions.size : (this.lastUserPositions?.length ?? this.lastUserPositionsCount);
+    const pollInfo = this.getCurrentPollingInfo(this.lastLeaderPositions.size, userPosCount);
     let baseInterval = pollInfo.currentIntervalMs;
     if (scheduleStatus.enabled && scheduleStatus.isSleeping && scheduleStatus.action === 'STANDBY') {
       baseInterval = 60000; // Mode STANDBY lambat (60s) saat jam istirahat

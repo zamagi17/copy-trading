@@ -45,14 +45,20 @@ export interface WeekendBreakStatus {
   resumeTimeStr: string;       // Jadwal selesai libur (Senin 00:00 WIB)
 }
 
+export interface IdleStandbyConfig {
+  enabled: boolean;          // true jika mode jeda hemat saat 0 posisi aktif (default true)
+  idleIntervalSec: number;   // Jeda polling saat tidak ada posisi (detik, default 5.0)
+}
+
 export interface PollingStatusInfo {
   isAdaptive: boolean;
   currentIntervalMs: number;
   sessionName: string;
-  sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' | 'manual' | 'weekend_break';
+  sessionKey: 'dawn' | 'morning' | 'afternoon' | 'night' | 'manual' | 'weekend_break' | 'idle_standby';
   wibTimeStr: string;
   cstTimeStr?: string;
   isWeekendHoliday?: boolean;
+  isIdleStandby?: boolean;
 }
 
 export interface DailyScheduleConfig {
@@ -98,6 +104,7 @@ export interface AppConfig {
   emergencySlPct: number;
   pollingIntervalMs: number;
   adaptivePolling?: AdaptivePollingConfig;
+  idleStandby?: IdleStandbyConfig;
   weekendBreak?: WeekendBreakConfig;
   dailySchedule?: DailyScheduleConfig;
   proxy: ProxyConfig;
@@ -195,6 +202,7 @@ export interface EngineStatus {
   weekendBreak?: WeekendBreakStatus;
   dailySchedule?: DailyScheduleStatus;
   slippageSkippedOrders?: SkippedOrderInfo[];
+  isIdleStandby?: boolean;
 }
 
 export interface SkippedOrderInfo {
