@@ -220,7 +220,7 @@
           </div>
           <div class="spec-item">
             <span class="spec-label"><i data-lucide="palmtree"></i> <span data-i18n="spec_weekend_label">Libur Akhir Pekan:</span></span>
-            <span class="spec-value text-green" id="specWeekendBreak">Aktif (CST)</span>
+            <span class="spec-value text-green" id="specWeekendBreak">Aktif (WIB)</span>
           </div>
           <div class="spec-item">
             <span class="spec-label"><i data-lucide="repeat"></i> <span data-i18n="spec_reverse_label">Reverse Mode:</span></span>
@@ -467,10 +467,9 @@
           <!-- Adaptive Schedule Panel (shown when adaptive is ON) -->
           <div class="adaptive-schedule-panel" id="adaptiveSchedulePanel" style="display: none;">
             <div class="schedule-header">
-              <span class="schedule-title"><i data-lucide="clock"></i> <span data-i18n="adaptive_panel_title">Jadwal Sesi Pasar WIB (UTC+7) & China (UTC+8)</span></span>
+              <span class="schedule-title"><i data-lucide="clock"></i> <span data-i18n="adaptive_panel_title">Jadwal Sesi Pasar WIB (UTC+7)</span></span>
               <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                 <span class="badge badge-sky" id="currentWibBadge">Waktu WIB: --:--</span>
-                <span class="badge badge-emerald" id="currentCstBadge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">China CST: --:--</span>
               </div>
             </div>
 
@@ -549,19 +548,19 @@
           </div>
         </fieldset>
 
-        <!-- Tab: Weekend Holiday (Waktu China CST UTC+8) -->
+        <!-- Tab: Weekend Holiday (Waktu WIB UTC+7) -->
         <fieldset class="form-group-fieldset">
-          <legend><i data-lucide="palmtree"></i> <span data-i18n="legend_weekend_break">Opsi Libur Akhir Pekan (Waktu China CST UTC+8)</span></legend>
+          <legend><i data-lucide="palmtree"></i> <span data-i18n="legend_weekend_break">Opsi Libur Akhir Pekan (Waktu WIB UTC+7)</span></legend>
           
           <div class="form-row">
             <div class="form-field checkbox-field" style="margin-top: 4px;">
               <label class="custom-checkbox">
                 <input type="checkbox" id="checkWeekendBreak" onchange="toggleWeekendBreakInputs()">
                 <span class="checkmark"></span>
-                <span style="font-weight: 700; color: #34d399;" data-i18n="check_weekend_break">Aktifkan Libur Sabtu & Minggu (Waktu China CST UTC+8)</span>
+                <span style="font-weight: 700; color: #34d399;" data-i18n="check_weekend_break">Aktifkan Libur Sabtu & Minggu (Waktu WIB UTC+7)</span>
               </label>
               <small data-i18n="hint_weekend_break_intro" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
-                Disesuaikan dengan lead trader China. Libur otomatis berlaku jika <strong>tidak ada posisi yang terbuka</strong>.
+                Libur otomatis berlaku jika <strong>tidak ada posisi yang terbuka</strong> pada hari Sabtu & Minggu (WIB).
               </small>
             </div>
           </div>
@@ -569,12 +568,11 @@
           <div id="weekendBreakInputsRow" class="weekend-holiday-panel">
             <div class="weekend-info-card">
               <div class="weekend-info-header">
-                <span class="weekend-clock-pill"><i data-lucide="clock"></i> <span id="weekendModalCstClock">China CST: --:--</span></span>
-                <span class="weekend-clock-pill wib"><i data-lucide="map-pin"></i> <span id="weekendModalWibClock">WIB: --:--</span></span>
+                <span class="weekend-clock-pill wib"><i data-lucide="clock"></i> <span id="weekendModalWibClock">WIB: --:--</span></span>
                 <span class="badge badge-emerald" id="weekendModalStatusBadge">Status: Standby</span>
               </div>
               <p class="weekend-info-text" data-i18n="weekend_info_explanation">
-                <strong>Jadwal Libur:</strong> Jumat 23:00 WIB (Sabtu 00:00 CST) s/d Minggu 23:00 WIB (Senin 00:00 CST).<br>
+                <strong>Jadwal Libur:</strong> Sabtu 00:00 WIB s/d Minggu 23:59 WIB (Buka Kembali: Senin 00:00 WIB).<br>
                 <strong>Aturan Keamanan:</strong> Jika akhir pekan tiba namun akun masih memiliki posisi terbuka, bot <strong>tetap aktif mengawal</strong> hingga posisi tertutup. Begitu bersih (0 posisi), bot otomatis beristirahat & melambatkan polling.
               </p>
             </div>
@@ -681,6 +679,32 @@
                 <span class="checkmark"></span>
                 <span data-i18n="check_sync_leverage">Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)</span>
               </label>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.08);">
+            <div class="form-field checkbox-field" style="margin-top: 4px;">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkSniperPullback" checked>
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #38bdf8;" data-i18n="check_sniper_pullback">🎯 Auto-Sniper Pullback (Otomatis Masuk Saat Harga Pullback ke Entry Leader / Diskon)</span>
+              </label>
+              <small data-i18n="hint_sniper_pullback" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                Jika harga saat order terdeteksi lebih buruk (kemahalan), order otomatis ditahan sementara. Bot memantau pergerakan harga setiap detik dan akan <strong>otomatis mengeksekusi seketika harga pullback kembali</strong> menyentuh harga entry leader atau lebih murah.
+              </small>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px;">
+            <div class="form-field checkbox-field">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkZeroSlippageOnly" checked>
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #10b981;" data-i18n="check_zero_slippage_only">🛡️ Disiplin Ketat: Hanya Eksekusi di Slippage 0 atau Plus (Diskon)</span>
+              </label>
+              <small data-i18n="hint_zero_slippage_only" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
+                100% menolak harga yang lebih buruk dari entry leader. Akun Anda hanya akan masuk jika harga sama persis atau lebih murah/menguntungkan (Slippage 0 / Diskon).
+              </small>
             </div>
           </div>
 
@@ -874,7 +898,7 @@
               <span style="font-weight: 700; color: #f59e0b;" data-i18n="check_bypass_weekend">Bypass Libur Akhir Pekan</span>
             </label>
             <small data-i18n="hint_bypass_weekend" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px;">
-              Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan CST menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.
+              Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan WIB menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.
             </small>
           </div>
         </div>

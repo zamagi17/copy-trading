@@ -344,7 +344,7 @@ export class CopyTradeEngine {
     if (!parsed.weekendBreak) {
       parsed.weekendBreak = {
         enabled: true,
-        timezone: 'CST',
+        timezone: 'WIB',
         standbyIntervalSec: 60,
         blockNewTrades: true,
         smartReEntryEnabled: true,
@@ -367,6 +367,8 @@ export class CopyTradeEngine {
     }
     if (parsed.reverseTrading === undefined) parsed.reverseTrading = false;
     if (!parsed.reorderWindowMinutes) parsed.reorderWindowMinutes = 30;
+    if (parsed.zeroSlippageOnly === undefined) parsed.zeroSlippageOnly = true;
+    if (parsed.sniperPullbackEnabled === undefined) parsed.sniperPullbackEnabled = true;
     if (parsed.ratioMultiplier === undefined) parsed.ratioMultiplier = 1.0;
     if (parsed.fixedAmountUsdt === undefined) parsed.fixedAmountUsdt = 25.0;
     if (parsed.maxModalPerCoin === undefined) parsed.maxModalPerCoin = 0;
@@ -403,6 +405,8 @@ export class CopyTradeEngine {
       maxSlippagePct: 0.5,
       reverseTrading: false,
       reorderWindowMinutes: 30,
+      zeroSlippageOnly: true,
+      sniperPullbackEnabled: true,
       syncLeverage: true,
       emergencySlPct: 10.0,
       pollingIntervalMs: 2500,
@@ -615,36 +619,37 @@ export class CopyTradeEngine {
   }
 
   /**
-   * Mengembalikan waktu China (CST, UTC+8) dan waktu WIB (UTC+7)
+   * Mengembalikan waktu WIB (UTC+7) dan status akhir pekan
    */
   getTimes() {
     const now = new Date();
     // UTC time
     const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const cstTime = new Date(utcMs + (8 * 3600000));
     const wibTime = new Date(utcMs + (7 * 3600000));
+    const cstTime = new Date(utcMs + (8 * 3600000));
 
     const daysId = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
-    const cstDay = cstTime.getDay(); // 0 = Minggu, 6 = Sabtu
-    const isWeekendCST = (cstDay === 0 || cstDay === 6);
+    const wibDay = wibTime.getDay(); // 0 = Minggu, 6 = Sabtu
+    const isWeekendWIB = (wibDay === 0 || wibDay === 6);
 
-    const cstHh = String(cstTime.getHours()).padStart(2, '0');
-    const cstMm = String(cstTime.getMinutes()).padStart(2, '0');
-    const cstTimeStr = `${daysId[cstDay]}, ${cstHh}:${cstMm} CST`;
-
-    const wibDay = wibTime.getDay();
     const wibHh = String(wibTime.getHours()).padStart(2, '0');
     const wibMm = String(wibTime.getMinutes()).padStart(2, '0');
     const wibTimeStr = `${daysId[wibDay]}, ${wibHh}:${wibMm} WIB`;
 
+    const cstDay = cstTime.getDay();
+    const cstHh = String(cstTime.getHours()).padStart(2, '0');
+    const cstMm = String(cstTime.getMinutes()).padStart(2, '0');
+    const cstTimeStr = `${daysId[cstDay]}, ${cstHh}:${cstMm} CST`;
+
     return {
-      cstTime,
       wibTime,
-      cstDay,
-      isWeekendCST,
-      cstTimeStr,
+      wibDay,
+      isWeekendWIB,
+      isWeekendCST: isWeekendWIB, // Alias kompatibilitas
       wibTimeStr,
+      cstTimeStr,
+      cstTime,
       wibHour: wibTime.getHours(),
       wibMinute: wibTime.getMinutes(),
     };
@@ -827,7 +832,7 @@ export class CopyTradeEngine {
 
   getWeekendBreakStatus(overridePositionsCount?: number): WeekendBreakStatus {
     const times = this.getTimes();
-    const isWeekend = times.isWeekendCST;
+    const isWeekend = times.isWeekendWIB;
     const cfg = this.config.weekendBreak;
 
     const count = overridePositionsCount !== undefined ? overridePositionsCount : this.getUserPositionsCount();
@@ -854,11 +859,12 @@ export class CopyTradeEngine {
       }
     }
 
-    // Libur aktif HANYA jika enabled, akhir pekan CST, tidak ada posisi terbuka, di luar re-entry window, DAN belum dibatalkan oleh transaksi leader
+    // Libur aktif HANYA jika enabled, akhir pekan WIB, tidak ada posisi terbuka, di luar re-entry window, DAN belum dibatalkan oleh transaksi leader
     const isHolidayActive = Boolean(cfg?.enabled && isWeekend && !hasOpenPositions && !inReEntryWindow && !this.isHolidayAborted);
 
     return {
-      isWeekendCST: isWeekend,
+      isWeekendWIB: isWeekend,
+      isWeekendCST: isWeekend, // Alias kompatibilitas
       hasOpenPositions,
       isHolidayActive,
       inReEntryWindow,
@@ -866,9 +872,9 @@ export class CopyTradeEngine {
       isHolidayAborted: this.isHolidayAborted,
       abortedReason: this.holidayAbortedReason,
       abortedAt: this.holidayAbortedAt,
-      cstTimeStr: times.cstTimeStr,
       wibTimeStr: times.wibTimeStr,
-      resumeTimeStr: 'Senin 00:00 CST (Minggu 23:00 WIB)',
+      cstTimeStr: times.cstTimeStr,
+      resumeTimeStr: 'Senin 00:00 WIB',
     };
   }
 
@@ -885,7 +891,7 @@ export class CopyTradeEngine {
     this.saveVirtualState();
 
     const times = this.getTimes();
-    const timeStr = `${times.wibTimeStr} WIB (${times.cstTimeStr} CST)`;
+    const timeStr = `${times.wibTimeStr}`;
 
     this.log('WARN', `🚨 [LEADER AKTIF DI AKHIR PEKAN] Terdeteksi transaksi (${reason}) dari Leader saat mode libur akhir pekan! Mode libur otomatis DIBATALKAN. Bot kembali ke mode aktif penuh untuk menyalin trade!`);
 
@@ -897,8 +903,8 @@ export class CopyTradeEngine {
       `🕒 Waktu: <b>${timeStr}</b>\n\n` +
       `🟢 <b>TINDAKAN OTOMATIS:</b>\n` +
       `1. Mode libur akhir pekan otomatis <b>DIBATALKAN</b>.\n` +
-      `2. Polling standby (60s) dikembalikan ke <b>kecepatan penuh</b>.\n` +
-      `3. Transaksi Leader langsung <b>disalin / dieksekusi</b> ke akun Anda!`
+      `2. Polling standby (60s) langsung dikembalikan ke <b>kecepatan penuh (1-1.5s)</b>.\n` +
+      `3. Transaksi Leader langsung <b>disalin / dieksekusi</b> (atau masuk antrean Auto-Sniper jika harga sempat bergeser)!`
     );
 
     if (this.wsBroadcaster) {
@@ -1062,6 +1068,20 @@ export class CopyTradeEngine {
     const times = this.getTimes();
     const weekendStatus = this.getWeekendBreakStatus();
 
+    // 0. Prioritas Utama: Jika terdapat antrean Auto-Sniper yang sedang mengintai pullback harga,
+    // jangan gunakan standby lambat (60s). Selalu polling cepat (1-1.5s) agar momentum pullback diskon tidak hilang!
+    if (this.slippageSkippedOrders.size > 0) {
+      return {
+        isAdaptive: false,
+        currentIntervalMs: this.config.pollingIntervalMs || 1500,
+        sessionName: `🎯 Auto-Sniper Pullback Hunt (${this.slippageSkippedOrders.size} order)`,
+        sessionKey: 'weekend_break',
+        wibTimeStr: times.wibTimeStr,
+        cstTimeStr: times.cstTimeStr,
+        isWeekendHoliday: weekendStatus.isHolidayActive,
+      };
+    }
+
     // 1. Jika dalam Jendela Toleransi Smart Re-Entry (tetap polling aktif agar re-entry cepat tertangkap)
     if (weekendStatus.inReEntryWindow) {
       return {
@@ -1075,13 +1095,13 @@ export class CopyTradeEngine {
       };
     }
 
-    // 2. Jika Mode Libur Akhir Pekan aktif (akhir pekan CST & tidak ada posisi terbuka & luar re-entry window)
+    // 2. Jika Mode Libur Akhir Pekan aktif (akhir pekan WIB & tidak ada posisi terbuka & luar re-entry window)
     if (weekendStatus.isHolidayActive) {
       const standbySec = this.config.weekendBreak?.standbyIntervalSec || 60;
       return {
         isAdaptive: false,
         currentIntervalMs: standbySec * 1000,
-        sessionName: '🌴 Libur Akhir Pekan (Standby CST)',
+        sessionName: '🌴 Libur Akhir Pekan (Standby WIB)',
         sessionKey: 'weekend_break',
         wibTimeStr: times.wibTimeStr,
         cstTimeStr: times.cstTimeStr,
@@ -1132,7 +1152,7 @@ export class CopyTradeEngine {
     }
 
     // Jika akhir pekan tapi masih ada posisi terbuka, berikan catatan status
-    if (weekendStatus.isWeekendCST && weekendStatus.hasOpenPositions) {
+    if (weekendStatus.isWeekendWIB && weekendStatus.hasOpenPositions) {
       sessionName += ' (Mengawal Posisi Terbuka)';
     }
 
@@ -1435,20 +1455,20 @@ export class CopyTradeEngine {
     }
     this.lastUserPositionsCount = userPositions.length;
 
-    // Evaluasi status Mode Libur Akhir Pekan (Waktu China CST UTC+8)
+    // Evaluasi status Mode Libur Akhir Pekan (Waktu WIB UTC+7)
     const weekendStatus = this.getWeekendBreakStatus(userPositions.length);
     if (this.config.weekendBreak?.enabled) {
       if (weekendStatus.isHolidayActive) {
         if (!this.isHolidayActive) {
           this.isHolidayActive = true;
-          this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Seluruh posisi bersih (0 posisi terbuka). Bot memasuki Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Polling dialihkan ke mode standby (${this.config.weekendBreak.standbyIntervalSec || 60}s) hingga ${weekendStatus.resumeTimeStr}.`);
-          this.sendTelegramRateLimited('WEEKEND_ENTER', `🌴 <b>[MODE LIBUR AKHIR PEKAN AKTIF]</b>\n\nSeluruh posisi akun Anda bersih (0 posisi terbuka).\nSesuai jadwal Waktu China (CST, UTC+8), bot beristirahat hemat kuota hingga <b>${weekendStatus.resumeTimeStr}</b>.`);
+          this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Seluruh posisi bersih (0 posisi terbuka). Bot memasuki Mode Libur Akhir Pekan (Waktu WIB: ${weekendStatus.wibTimeStr}). Polling dialihkan ke mode standby (${this.config.weekendBreak.standbyIntervalSec || 60}s) hingga ${weekendStatus.resumeTimeStr}.`);
+          this.sendTelegramRateLimited('WEEKEND_ENTER', `🌴 <b>[MODE LIBUR AKHIR PEKAN AKTIF]</b>\n\nSeluruh posisi akun Anda bersih (0 posisi terbuka).\nSesuai jadwal Waktu Indonesia Barat (WIB, UTC+7), bot beristirahat hemat kuota hingga <b>${weekendStatus.resumeTimeStr}</b>.`);
         }
-      } else if (!weekendStatus.isWeekendCST) {
+      } else if (!weekendStatus.isWeekendWIB) {
         if (this.isHolidayActive) {
           this.isHolidayActive = false;
-          this.log('SUCCESS', `🌅 [PASAR BUKA] Akhir pekan telah berakhir (Waktu China: ${weekendStatus.cstTimeStr}). Mode Libur Akhir Pekan selesai! Copy trade kembali aktif normal.`);
-          this.sendTelegramRateLimited('WEEKEND_EXIT', `🌅 <b>[COPY TRADE KEMBALI AKTIF]</b>\n\nAkhir pekan telah berakhir. Bot copy trade telah kembali aktif penuh memantau transaksi leader.`);
+          this.log('SUCCESS', `🌅 [PASAR BUKA] Akhir pekan telah berakhir (Waktu WIB: ${weekendStatus.wibTimeStr}). Mode Libur Akhir Pekan selesai! Copy trade kembali aktif normal.`);
+          this.sendTelegramRateLimited('WEEKEND_EXIT', `🌅 <b>[COPY TRADE KEMBALI AKTIF]</b>\n\nAkhir pekan telah berakhir (Waktu WIB). Bot copy trade telah kembali aktif penuh memantau transaksi leader.`);
         }
         if (this.isHolidayAborted) {
           this.isHolidayAborted = false;
@@ -1489,7 +1509,7 @@ export class CopyTradeEngine {
             .sort((a, b) => a.orderTime - b.orderTime); // urutkan kronologis dari lama ke baru
 
           // AUTO-ABORT LIBUR AKHIR PEKAN JIKA ADA TRANSAKSI BARU DARI LEADER
-          if (newOrders.length > 0 && this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+          if (newOrders.length > 0 && this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendWIB && !this.isHolidayAborted))) {
             const firstOrd = newOrders[0];
             const orderDesc = `${firstOrd.action} ${firstOrd.symbol} (${firstOrd.positionSide}) @ $${firstOrd.avgPrice || 0}`;
             this.abortWeekendHoliday(`Order baru: ${orderDesc}`, `${newOrders.length} transaksi baru terdeteksi pada feed stream leader`);
@@ -1846,7 +1866,7 @@ export class CopyTradeEngine {
         this.isFirstTick = false;
         this.lastLeaderPositions = new Map(currentLeaderMap);
         this.log('INFO', `📡 [BASELINE COLD START] Sinkronisasi ${currentLeaderMap.size} posisi aktif leader sebagai baseline. Bot siap mengeksekusi order baru begitu leader bertransaksi!`);
-        if (currentLeaderMap.size > 0 && weekendStatus.isWeekendCST && this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false) {
+        if (currentLeaderMap.size > 0 && weekendStatus.isWeekendWIB && this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false) {
           const syms = Array.from(currentLeaderMap.keys()).join(', ');
           this.abortWeekendHoliday(`Leader memiliki posisi aktif (${syms})`, `Deteksi baseline posisi aktif leader di akhir pekan`);
         }
@@ -1857,7 +1877,7 @@ export class CopyTradeEngine {
           if (!prevLeaderPos) {
             // POSISI BARU DIBUKA OLEH LEADER
             this.log('INFO', `🔥 DETEKSI POSISI BARU: Leader membuka ${leaderPos.positionSide} ${leaderPos.symbol} @ $${leaderPos.entryPrice} (Vol: ${leaderPos.amount})`);
-            if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+            if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendWIB && !this.isHolidayAborted))) {
               this.abortWeekendHoliday(`Buka posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `Entry: $${leaderPos.entryPrice}, Vol: ${leaderPos.amount}`);
             }
             const dailyScheduleStatus = this.getDailyScheduleStatus();
@@ -1881,7 +1901,7 @@ export class CopyTradeEngine {
             if (deltaAmount > 0 && deltaPct >= 0.02) {
               // Leader Menambah Posisi (Averaging Down / Scaling In)
               this.log('INFO', `📈 LEADER MENAMBAH POSISI: ${leaderPos.symbol} ${leaderPos.positionSide} (+${deltaAmount.toFixed(4)} koin, +${(deltaPct * 100).toFixed(1)}%)`);
-              if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+              if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendWIB && !this.isHolidayAborted))) {
                 this.abortWeekendHoliday(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
               }
               const dailyScheduleStatus = this.getDailyScheduleStatus();
@@ -1901,7 +1921,7 @@ export class CopyTradeEngine {
             } else if (deltaAmount < 0 && Math.abs(deltaPct) >= 0.02) {
               // Leader Partial Close
               this.log('INFO', `📉 LEADER PARTIAL CLOSE: ${leaderPos.symbol} ${leaderPos.positionSide} (-${Math.abs(deltaAmount).toFixed(4)} koin)`);
-              if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+              if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendWIB && !this.isHolidayAborted))) {
                 this.abortWeekendHoliday(`Partial close ${leaderPos.symbol} (${leaderPos.positionSide})`, `-${Math.abs(deltaAmount).toFixed(4)} koin`);
               }
               const dailyScheduleStatus = this.getDailyScheduleStatus();
@@ -1918,7 +1938,7 @@ export class CopyTradeEngine {
         for (const [key, prevLeaderPos] of this.lastLeaderPositions.entries()) {
           if (!currentLeaderMap.has(key)) {
             this.log('INFO', `🎯 LEADER MENUTUP POSISI: ${prevLeaderPos.symbol} ${prevLeaderPos.positionSide}. Menutup posisi akun pengguna...`);
-            if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendCST && !this.isHolidayAborted))) {
+            if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendWIB && !this.isHolidayAborted))) {
               this.abortWeekendHoliday(`Tutup posisi ${prevLeaderPos.symbol} (${prevLeaderPos.positionSide})`, `Leader menutup penuh posisi`);
             }
             const dailyScheduleStatus = this.getDailyScheduleStatus();
@@ -2004,6 +2024,9 @@ export class CopyTradeEngine {
     this.lastLeaderPositions = currentLeaderMap;
     this.lastLeaderDetail = leaderDetail;
 
+    // AUTO-SNIPER PULLBACK: Periksa antrean order tertahan yang harganya telah pullback ke level entry leader
+    await this.checkAutoSniperPullback(currentLeaderMap, userBalance, userPositionsMap);
+
     // Pasang avgCount ke posisi leader dan user sebelum broadcast
     for (const lp of currentLeaderPositions) {
       const counts = this.positionAvgCounts.get(`${lp.symbol}_${lp.positionSide}`);
@@ -2041,7 +2064,7 @@ export class CopyTradeEngine {
   }
 
   private async handleNewPosition(leaderPos: LeadPosition, userBalance: number, existingUserPos?: UserPosition): Promise<UserPosition | null> {
-    // 0. Proteksi Mode Libur Akhir Pekan (Waktu China CST UTC+8)
+    // 0. Proteksi Mode Libur Akhir Pekan (Waktu WIB UTC+7)
     const isAveragingDown = Boolean(existingUserPos && Math.abs(existingUserPos.positionAmt) > 0);
     const weekendStatus = this.getWeekendBreakStatus();
 
@@ -2059,7 +2082,7 @@ export class CopyTradeEngine {
       this.abortDailySchedule(`Leader Membuka Posisi: ${leaderPos.symbol} (${leaderPos.positionSide})`, `Auto-abort dipicu di handleNewPosition`);
     }
 
-    if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
+    if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendWIB && this.config.weekendBreak.blockNewTrades !== false) {
       if (this.config.weekendBreak?.autoAbortOnLeaderTrade !== false) {
         this.abortWeekendHoliday(`Leader Membuka Posisi: ${leaderPos.symbol} (${leaderPos.positionSide})`, `Auto-abort dipicu di handleNewPosition`);
       } else if (isAveragingDown) {
@@ -2075,7 +2098,7 @@ export class CopyTradeEngine {
         );
         this.recentlyClosedCoins.delete(leaderPos.symbol);
       } else {
-        this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu China: ${weekendStatus.cstTimeStr}) dan akun belum memiliki posisi terbuka pada koin ini.`);
+        this.log('INFO', `🌴 [LIBUR AKHIR PEKAN] Melewatkan pembukaan posisi baru ${leaderPos.symbol} ${leaderPos.positionSide} karena Mode Libur Akhir Pekan aktif (Waktu WIB: ${weekendStatus.wibTimeStr}) dan akun belum memiliki posisi terbuka pada koin ini.`);
         return null;
       }
     }
@@ -2085,10 +2108,41 @@ export class CopyTradeEngine {
       return null;
     }
 
-    // Validasi Slippage Guard
+    // Proteksi duplikasi order: Jika akun Anda sudah memiliki posisi terbuka pada simbol & arah ini, lewati pembukaan ganda
+    if (existingUserPos && Math.abs(existingUserPos.positionAmt) > 0) {
+      this.log('INFO', `ℹ️ Posisi ${leaderPos.symbol} ${existingUserPos.positionSide} sudah terbuka aktif di akun Anda. Menghubungkan tracking posisi tanpa membuka order baru.`);
+      return existingUserPos;
+    }
+
+    // Cek apakah mode Reverse Trading (Fade Leader) aktif untuk posisi baru
+    const isInverse = Boolean(this.config.reverseTrading && !existingUserPos);
+    const userPositionSide: 'LONG' | 'SHORT' = isInverse
+      ? (leaderPos.positionSide === 'LONG' ? 'SHORT' : 'LONG')
+      : leaderPos.positionSide;
+    const side: 'BUY' | 'SELL' = userPositionSide === 'LONG' ? 'BUY' : 'SELL';
+
+    // Validasi Slippage Guard (Directional Asymmetric & Auto-Sniper)
+    let adverseSlippagePct = 0;
+    let favorableSlippagePct = 0;
     if (leaderPos.entryPrice > 0 && leaderPos.markPrice > 0) {
-      const slippage = Math.abs((leaderPos.markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
-      if (slippage > this.config.maxSlippagePct) {
+      if (userPositionSide === 'LONG') {
+        if (leaderPos.markPrice > leaderPos.entryPrice) {
+          adverseSlippagePct = ((leaderPos.markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+        } else {
+          favorableSlippagePct = ((leaderPos.entryPrice - leaderPos.markPrice) / leaderPos.entryPrice) * 100;
+        }
+      } else {
+        // SHORT
+        if (leaderPos.markPrice < leaderPos.entryPrice) {
+          adverseSlippagePct = ((leaderPos.entryPrice - leaderPos.markPrice) / leaderPos.entryPrice) * 100;
+        } else {
+          favorableSlippagePct = ((leaderPos.markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+        }
+      }
+
+      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+
+      if (adverseSlippagePct > allowedAdversePct) {
         const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
         this.slippageSkippedOrders.set(posKey, {
           symbol: leaderPos.symbol,
@@ -2096,21 +2150,29 @@ export class CopyTradeEngine {
           type: 'NEW_POSITION',
           leaderEntryPrice: leaderPos.entryPrice,
           markPrice: leaderPos.markPrice,
-          slippagePct: slippage,
+          slippagePct: adverseSlippagePct,
+          adverseSlippagePct,
+          targetPullbackPrice: leaderPos.entryPrice,
+          isSniperPending: true,
+          notifiedSniper: true,
           skippedAt: Date.now(),
-          reason: `Slippage ${slippage.toFixed(2)}% melebihi batas ${this.config.maxSlippagePct}%`,
+          reason: `Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dari entry leader ($${leaderPos.entryPrice}). Auto-Sniper aktif memantau pullback.`,
         });
         this.saveVirtualState();
 
-        this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan order agar tidak mengejar harga buruk! Tersedia tombol Re-Order (30 Menit) di dashboard.`);
+        const windowMins = this.config.reorderWindowMinutes || 30;
+        const targetOp = userPositionSide === 'LONG' ? '≤' : '≥';
+        const invTag = isInverse ? ' (🔄 Inversi)' : '';
+        this.log('WARN', `🎯 [AUTO-SNIPER AKTIF] Order ${leaderPos.symbol} (${userPositionSide}${invTag}) ditahan: Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dibanding entry leader ($${leaderPos.entryPrice}). Bot otomatis memantau pullback ke ${targetOp} $${leaderPos.entryPrice} selama ${windowMins} menit.`);
         this.sendTelegramRateLimited(
-          `SLIPPAGE_${posKey}`,
-          `⚠️ <b>ORDER DILEWATI - SLIPPAGE TINGGI</b>\n\n` +
-          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
-          `💵 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
-          `📊 Harga Pasar: <b>$${leaderPos.markPrice}</b>\n` +
-          `⚡ Selisih (Slippage): <b>${slippage.toFixed(2)}%</b> (Batas: ${this.config.maxSlippagePct}%)\n\n` +
-          `💡 <i>Tersedia tombol <b>Re-Order (30 Menit)</b> di Dashboard untuk mengeksekusi order susulan secara manual jika Anda ingin tetap masuk ke posisi ini.</i>`,
+          `SNIPER_PENDING_${posKey}`,
+          `🎯 <b>ORDER DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+          `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${invTag}\n` +
+          `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+          `📈 Harga Pasar Saat Ini: <b>$${leaderPos.markPrice}</b>\n` +
+          `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n\n` +
+          `🛡️ <i>Sistem menahan order demi memastikan Slippage 0 / Diskon. Bot memantau chart setiap detik dan akan <b>OTOMATIS MASUK</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b> (sisa batas toleransi ${windowMins} menit).</i>`,
           60000
         );
         return null;
@@ -2165,19 +2227,6 @@ export class CopyTradeEngine {
       }
     }
 
-    // Proteksi duplikasi order: Jika akun Anda sudah memiliki posisi terbuka pada simbol & arah ini, lewati pembukaan ganda
-    if (existingUserPos && Math.abs(existingUserPos.positionAmt) > 0) {
-      this.log('INFO', `ℹ️ Posisi ${leaderPos.symbol} ${existingUserPos.positionSide} sudah terbuka aktif di akun Anda. Menghubungkan tracking posisi tanpa membuka order baru.`);
-      return existingUserPos;
-    }
-
-    // Cek apakah mode Reverse Trading (Fade Leader) aktif untuk posisi baru
-    const isInverse = Boolean(this.config.reverseTrading && !existingUserPos);
-    const userPositionSide: 'LONG' | 'SHORT' = isInverse
-      ? (leaderPos.positionSide === 'LONG' ? 'SHORT' : 'LONG')
-      : leaderPos.positionSide;
-    const side: 'BUY' | 'SELL' = userPositionSide === 'LONG' ? 'BUY' : 'SELL';
-
     // JIKA MODE SIMULASI (PAPER TRADING) AKTIF: Eksekusi secara virtual tanpa API Key & tanpa modal riil
     if (this.config.paperTrading) {
       const posKey = `${leaderPos.symbol}_${userPositionSide}`;
@@ -2203,7 +2252,8 @@ export class CopyTradeEngine {
       this.virtualPositions.set(posKey, virtualPos);
       this.saveVirtualState();
       const modeTag = isInverse ? '🧪 SIMULASI - 🔄 INVERSE' : '🧪 SIMULASI';
-      this.log('SUCCESS', `[${modeTag}] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} (${userPositionSide}) @ $${markPrice} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${lev}x)`);
+      const discountTag = favorableSlippagePct > 0 ? ` [🔥 DISKON +${favorableSlippagePct.toFixed(2)}% LEBIH MURAH!]` : '';
+      this.log('SUCCESS', `[${modeTag}] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} (${userPositionSide}) @ $${markPrice}${discountTag} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${lev}x)`);
       this.sendTelegram(
         `🚀 <b>ORDER COPY TRADE DIBUKA [${modeTag}]</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
@@ -2212,6 +2262,7 @@ export class CopyTradeEngine {
         (leaderPos.entryPrice > 0 ? `🎯 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` : '') +
         `💵 Entry: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
+        (favorableSlippagePct > 0 ? `🔥 Slippage Plus: <b>Diskon +${favorableSlippagePct.toFixed(2)}% Lebih Murah dari Leader!</b>\n` : '') +
         `📦 Volume: <b>${targetQty}</b>\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
         `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
@@ -2243,6 +2294,7 @@ export class CopyTradeEngine {
         (leaderPos.entryPrice > 0 ? `🎯 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` : '') +
         `💵 Entry: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
+        (favorableSlippagePct > 0 ? `🔥 Slippage Plus: <b>Diskon +${favorableSlippagePct.toFixed(2)}% Lebih Murah dari Leader!</b>\n` : '') +
         `📦 Volume: <b>${targetQty}</b>\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
         `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
@@ -2297,10 +2349,30 @@ export class CopyTradeEngine {
     const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
     const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
 
-    // Slippage Guard pada order averaging down
-    if (leaderPos.entryPrice > 0 && markPrice > 0 && this.config.maxSlippagePct > 0) {
-      const slippage = Math.abs((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
-      if (slippage > this.config.maxSlippagePct) {
+    // Slippage Guard pada order averaging down (Directional Asymmetric)
+    const userSide = existingUserPos.positionSide;
+    let adverseSlippagePct = 0;
+    let favorableSlippagePct = 0;
+
+    if (leaderPos.entryPrice > 0 && markPrice > 0) {
+      if (userSide === 'LONG') {
+        if (markPrice > leaderPos.entryPrice) {
+          adverseSlippagePct = ((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+        } else {
+          favorableSlippagePct = ((leaderPos.entryPrice - markPrice) / leaderPos.entryPrice) * 100;
+        }
+      } else {
+        // SHORT
+        if (markPrice < leaderPos.entryPrice) {
+          adverseSlippagePct = ((leaderPos.entryPrice - markPrice) / leaderPos.entryPrice) * 100;
+        } else {
+          favorableSlippagePct = ((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+        }
+      }
+
+      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+
+      if (adverseSlippagePct > allowedAdversePct) {
         const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
         this.slippageSkippedOrders.set(posKey, {
           symbol: leaderPos.symbol,
@@ -2308,21 +2380,27 @@ export class CopyTradeEngine {
           type: 'AVERAGING',
           leaderEntryPrice: leaderPos.entryPrice,
           markPrice: markPrice,
-          slippagePct: slippage,
+          slippagePct: adverseSlippagePct,
+          adverseSlippagePct,
+          targetPullbackPrice: leaderPos.entryPrice,
+          isSniperPending: true,
+          notifiedSniper: true,
           skippedAt: Date.now(),
-          reason: `Averaging slippage ${slippage.toFixed(2)}% melebihi batas ${this.config.maxSlippagePct}%`,
+          reason: `Averaging market price ($${markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dibanding entry leader ($${leaderPos.entryPrice}). Auto-Sniper aktif memantau pullback.`,
         });
         this.saveVirtualState();
 
-        this.log('WARN', `⚠️ SLIPPAGE TERLALU TINGGI pada averaging ${leaderPos.symbol}: ${slippage.toFixed(2)}% (Maks: ${this.config.maxSlippagePct}%). Melewatkan averaging agar tidak mengejar harga buruk! Tersedia tombol Sync Avg (30 Menit) di dashboard.`);
+        const windowMins = this.config.reorderWindowMinutes || 30;
+        const targetOp = userSide === 'LONG' ? '≤' : '≥';
+        this.log('WARN', `🎯 [AUTO-SNIPER AVG AKTIF] Averaging ${leaderPos.symbol} (${userSide}) ditahan: Harga pasar ($${markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dari entry leader ($${leaderPos.entryPrice}). Bot memantau pullback ke ${targetOp} $${leaderPos.entryPrice}.`);
         this.sendTelegramRateLimited(
           `SLIPPAGE_AVG_${posKey}`,
-          `⚠️ <b>AVERAGING DILEWATI - SLIPPAGE TINGGI</b>\n\n` +
-          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${leaderPos.positionSide})\n` +
-          `💵 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
-          `📊 Harga Pasar: <b>$${markPrice}</b>\n` +
-          `⚡ Selisih (Slippage): <b>${slippage.toFixed(2)}%</b> (Batas: ${this.config.maxSlippagePct}%)\n\n` +
-          `💡 <i>Tersedia tombol <b>Sync Avg (30 Menit)</b> di Dashboard untuk mengeksekusi penambahan layer secara manual jika Anda ingin tetap masuk.</i>`,
+          `🎯 <b>AVERAGING DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
+          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${userSide})\n` +
+          `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+          `📈 Harga Pasar Saat Ini: <b>$${markPrice}</b>\n` +
+          `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n\n` +
+          `🛡️ <i>Sistem menahan penambahan layer demi memastikan harga averaging sama atau lebih menguntungkan. Bot memantau chart dan akan <b>OTOMATIS MENAMBAH LAYER</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b>.</i>`,
           60000
         );
         return null;
@@ -2731,12 +2809,12 @@ export class CopyTradeEngine {
     // 1. Validasi proteksi Libur Akhir Pekan (jika tidak dibypass)
     if (!bypassWeekend) {
       const weekendStatus = this.getWeekendBreakStatus();
-      if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendCST && this.config.weekendBreak.blockNewTrades !== false) {
-        this.log('WARN', `🌴 [TEST ORDER DITOLAK] Order uji coba ${symbol} ${positionSide} diblokir oleh Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Sistem berjalan normal menolak order baru saat libur!`);
+      if (!this.isHolidayAborted && this.config.weekendBreak?.enabled && weekendStatus.isWeekendWIB && this.config.weekendBreak.blockNewTrades !== false) {
+        this.log('WARN', `🌴 [TEST ORDER DITOLAK] Order uji coba ${symbol} ${positionSide} diblokir oleh Mode Libur Akhir Pekan (Waktu WIB: ${weekendStatus.wibTimeStr}). Sistem berjalan normal menolak order baru saat libur!`);
         return {
           success: false,
           blockedByWeekend: true,
-          message: `Order uji coba ${symbol} ${positionSide} DITOLAK oleh Mode Libur Akhir Pekan (Waktu China: ${weekendStatus.cstTimeStr}). Sistem bekerja dengan benar mengamankan akun dari trading akhir pekan! Centang opsi "Bypass Libur Akhir Pekan" jika ingin memaksa order masuk.`,
+          message: `Order uji coba ${symbol} ${positionSide} DITOLAK oleh Mode Libur Akhir Pekan (Waktu WIB: ${weekendStatus.wibTimeStr}). Sistem bekerja dengan benar mengamankan akun dari trading akhir pekan! Centang opsi "Bypass Libur Akhir Pekan" jika ingin memaksa order masuk.`,
         };
       }
     }
@@ -2854,6 +2932,142 @@ export class CopyTradeEngine {
         const errMsg = err.response?.data?.msg || err.message;
         this.log('ERROR', `Gagal eksekusi order uji coba di Binance: ${errMsg}`);
         throw new Error(errMsg);
+      }
+    }
+  }
+
+  /**
+   * Pemantau Otomatis Auto-Sniper Pullback:
+   * Memeriksa order tertahan (karena slippage sebelumnya) pada setiap siklus tick.
+   * Jika harga pasar pullback menyentuh level entry leader atau lebih murah (Slippage 0 atau Plus),
+   * bot otomatis mengeksekusi order tanpa perlu intervensi manual!
+   */
+  private async checkAutoSniperPullback(
+    currentLeaderMap: Map<string, LeadPosition>,
+    userBalance: number,
+    userPositionsMap: Map<string, UserPosition>
+  ): Promise<void> {
+    if (this.config.sniperPullbackEnabled === false || this.slippageSkippedOrders.size === 0) {
+      return;
+    }
+
+    const windowMinutes = Math.max(1, this.config.reorderWindowMinutes || 30);
+    const windowMs = windowMinutes * 60 * 1000;
+    const now = Date.now();
+
+    for (const [posKey, item] of Array.from(this.slippageSkippedOrders.entries())) {
+      // 1. Cek apakah posisi leader masih ada di bursa
+      const leaderPos = currentLeaderMap.get(posKey) || this.streamLeaderPositions.get(posKey);
+      if (!leaderPos || leaderPos.amount <= 0) {
+        // Leader sudah menutup posisi ini sebelum harga sempat pullback!
+        this.slippageSkippedOrders.delete(posKey);
+        this.saveVirtualState();
+        this.log('INFO', `ℹ️ [AUTO-SNIPER DIBATALKAN] Leader telah menutup posisi ${item.symbol} (${item.positionSide}) sebelum harga pullback. Antrean sniper dibatalkan aman tanpa risiko.`);
+        this.sendTelegram(
+          `ℹ️ <b>[AUTO-SNIPER DIBATALKAN]</b>\n\n` +
+          `🪙 Simbol: <b>${item.symbol}</b> (${item.positionSide})\n` +
+          `👤 Status Leader: <b>Posisi Telah Ditutup di Bursa</b>\n` +
+          `🛡️ <i>Order tertahan otomatis dibatalkan karena leader sudah tidak memegang posisi ini. Akun Anda aman dan terhindar dari membuka posisi sendirian!</i>`
+        );
+        continue;
+      }
+
+      // 2. Cek batas toleransi waktu (reorderWindowMinutes)
+      const elapsedMs = now - item.skippedAt;
+      if (elapsedMs > windowMs) {
+        this.slippageSkippedOrders.delete(posKey);
+        this.saveVirtualState();
+        this.log('WARN', `⏱️ [AUTO-SNIPER KADALUARSA] Batas waktu toleransi ${windowMinutes} menit untuk ${item.symbol} telah berakhir. Antrean dibersihkan.`);
+        continue;
+      }
+
+      // 3. Ambil harga mark realtime bursa
+      let markPrice = leaderPos.markPrice || 0;
+      try {
+        const fetchedPrice = await binanceClient.getSymbolPrice(item.symbol);
+        if (fetchedPrice > 0) markPrice = fetchedPrice;
+      } catch {}
+
+      if (markPrice <= 0) continue;
+
+      // 4. Tentukan arah akun user
+      const isInverse = Boolean(this.config.reverseTrading);
+      const targetUserSide: 'LONG' | 'SHORT' = isInverse
+        ? (item.positionSide === 'LONG' ? 'SHORT' : 'LONG')
+        : item.positionSide;
+      const targetPrice = item.targetPullbackPrice || item.leaderEntryPrice;
+
+      // 5. Cek apakah kondisi Pullback (Slippage 0 / Diskon) sudah terpenuhi
+      let isPullbackMatched = false;
+      let discountPct = 0;
+
+      if (targetUserSide === 'LONG') {
+        if (markPrice <= targetPrice * 1.0001) {
+          isPullbackMatched = true;
+          discountPct = ((targetPrice - markPrice) / targetPrice) * 100;
+        }
+      } else {
+        // SHORT
+        if (markPrice >= targetPrice * 0.9999) {
+          isPullbackMatched = true;
+          discountPct = ((markPrice - targetPrice) / targetPrice) * 100;
+        }
+      }
+
+      if (isPullbackMatched) {
+        this.log('SUCCESS', `🎯 [AUTO-SNIPER PULLBACK MATCH!] Harga ${item.symbol} telah pullback ke $${markPrice} (Target: $${targetPrice}, Diskon: ${discountPct > 0 ? `+${discountPct.toFixed(2)}% Lebih Murah` : '0%'}!). Mengeksekusi order otomatis...`);
+
+        if (item.type === 'NEW_POSITION') {
+          // Proteksi anti-dobel jika akun sudah memiliki posisi
+          const { userPos } = this.getUserPositionForLeader(item.symbol, item.positionSide, userPositionsMap);
+          if (userPos && Math.abs(userPos.positionAmt) > 0) {
+            this.slippageSkippedOrders.delete(posKey);
+            this.saveVirtualState();
+            continue;
+          }
+
+          try {
+            const res = await this.syncNewPosition(item.symbol, item.positionSide, true, isInverse, true, leaderPos);
+            if (res.success) {
+              const executedPrice = res.price || markPrice;
+              const executedQty = res.qty || 0;
+              const discountText = discountPct > 0
+                ? `🔥 Diskon +${discountPct.toFixed(2)}% Lebih Murah dari Leader!`
+                : `0.00% (Identik Harga Leader)`;
+
+              this.sendTelegram(
+                `🎯 <b>AUTO-SNIPER PULLBACK BERHASIL MASUK! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +
+                `🪙 Simbol: <b>${item.symbol}</b>\n` +
+                `📊 Arah Akun: <b>${targetUserSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi)</i>' : ''}\n` +
+                `👤 Entry Leader: <b>$${targetPrice}</b>\n` +
+                `🎯 Entry Akun Anda: <b>$${executedPrice}</b>\n` +
+                `🔥 Hasil Slippage: <b>${discountText}</b>\n` +
+                `📦 Kuantitas: <b>${executedQty}</b>\n` +
+                `⚡ Mode: <b>Auto-Sniper Pullback Fill</b>`
+              );
+            }
+          } catch (err: any) {
+            this.log('ERROR', `Auto-Sniper gagal eksekusi order ${item.symbol}: ${err.message}`);
+          }
+        } else if (item.type === 'AVERAGING') {
+          try {
+            const res = await this.syncAveragingDown(item.symbol, item.positionSide);
+            if (res.success) {
+              this.slippageSkippedOrders.delete(posKey);
+              this.saveVirtualState();
+              this.sendTelegram(
+                `🎯 <b>AUTO-SNIPER AVERAGING DOWN MATCH! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +
+                `🪙 Simbol: <b>${item.symbol}</b> (${targetUserSide})\n` +
+                `👤 Entry Leader: <b>$${targetPrice}</b>\n` +
+                `🎯 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+                `📦 Tambahan Volume: <b>+${res.addQty || 0}</b>\n` +
+                `⚡ Mode: <b>Auto-Sniper Pullback Averaging</b>`
+              );
+            }
+          } catch (err: any) {
+            this.log('ERROR', `Auto-Sniper gagal eksekusi averaging ${item.symbol}: ${err.message}`);
+          }
+        }
       }
     }
   }
@@ -2978,6 +3192,15 @@ export class CopyTradeEngine {
       this.slippageSkippedOrders.delete(userPosKey);
       this.saveVirtualState();
       this.log('SUCCESS', `🧪 [MANUAL SYNC AVG DOWN] Berhasil sinkronisasi virtual averaging ${sym} (${userSide}) (+${neededAddQty} @ $${markPrice})!`);
+      this.sendTelegram(
+        `⚡ <b>SINKRONISASI AVERAGING DOWN BERHASIL [🧪 SIMULASI]</b>\n\n` +
+        `🪙 Simbol: <b>${sym}</b>\n` +
+        `📊 Arah Akun: <b>${userSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `🔄 Status: <b>Disinkronkan ke ${counts.user}x (${counts.user + 1} Layer)</b>\n` +
+        `💵 Harga: <b>$${markPrice}</b>\n` +
+        `📦 Tambahan Volume: <b>+${neededAddQty}</b>\n` +
+        `⚡ Mode: <b>Manual Sync Avg (Simulasi)</b>`
+      );
       return {
         success: true,
         message: `✅ Berhasil sinkronisasi virtual averaging ${sym} (${userSide}) (+${neededAddQty} koin).`,
@@ -3017,16 +3240,23 @@ export class CopyTradeEngine {
   }
 
   /**
-   * Eksekusi manual order baru (re-order susulan) untuk posisi yang sebelumnya dilewati karena slippage
+   * Eksekusi order baru (re-order susulan / Auto-Sniper) untuk posisi yang sebelumnya dilewati karena slippage
    * Memiliki jendela batas toleransi waktu configurable (default 30 menit, misal 120 menit)
    * Mendukung opsi kebalikan/inverse (Leader Long -> User Short, Leader Short -> User Long)
    */
-  async syncNewPosition(symbol: string, positionSide: 'LONG' | 'SHORT', force: boolean = false, invert?: boolean): Promise<{ success: boolean; message: string; position?: UserPosition }> {
+  async syncNewPosition(
+    symbol: string,
+    positionSide: 'LONG' | 'SHORT',
+    force: boolean = false,
+    invert?: boolean,
+    isAutoSniper: boolean = false,
+    leaderPosOverride?: LeadPosition
+  ): Promise<{ success: boolean; message: string; position?: UserPosition; qty?: number; price?: number }> {
     const sym = symbol.toUpperCase();
     const posKey = `${sym}_${positionSide}`;
 
     // 1. Cek keberadaan posisi leader
-    const leaderPos = this.streamLeaderPositions.get(posKey) || this.lastLeaderPositions.get(posKey);
+    const leaderPos = leaderPosOverride || this.streamLeaderPositions.get(posKey) || this.lastLeaderPositions.get(posKey);
     if (!leaderPos) {
       throw new Error(`Posisi leader untuk ${sym} ${positionSide} tidak ditemukan atau sudah ditutup.`);
     }
@@ -3135,21 +3365,25 @@ export class CopyTradeEngine {
       this.saveVirtualState();
 
       const invTag = isInverse ? ' (🔄 Inversi/Fade)' : '';
-      this.log('SUCCESS', `🧪 [MANUAL RE-ORDER${isInverse ? ' INVERSE' : ''} SIMULASI] Berhasil eksekusi order susulan ${sym} ${targetUserSide}${invTag} (${targetQty} koin @ $${markPrice})!`);
-      this.sendTelegram(
-        `⚡ <b>SINKRONISASI ORDER SUSULAN BERHASIL [🧪 SIMULASI${isInverse ? ' 🔄 INVERSE' : ''}]</b>\n\n` +
-        `🪙 Simbol: <b>${sym}</b>\n` +
-        `📊 Arah Akun: <b>${targetUserSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi Fade Leader)</i>' : ''}\n` +
-        `👤 Arah Leader: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
-        `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
-        `📦 Kuantitas: <b>${targetQty}</b>\n` +
-        `⚡ Mode: <b>Manual Re-Order${isInverse ? ' (Inverse / Fade)' : ''}</b>`
-      );
+      this.log('SUCCESS', `🧪 [${isAutoSniper ? 'AUTO-SNIPER' : 'MANUAL RE-ORDER'}${isInverse ? ' INVERSE' : ''} SIMULASI] Berhasil eksekusi order susulan ${sym} ${targetUserSide}${invTag} (${targetQty} koin @ $${markPrice})!`);
+      if (!isAutoSniper) {
+        this.sendTelegram(
+          `⚡ <b>SINKRONISASI ORDER SUSULAN BERHASIL [🧪 SIMULASI${isInverse ? ' 🔄 INVERSE' : ''}]</b>\n\n` +
+          `🪙 Simbol: <b>${sym}</b>\n` +
+          `📊 Arah Akun: <b>${targetUserSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi Fade Leader)</i>' : ''}\n` +
+          `👤 Arah Leader: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+          `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+          `📦 Kuantitas: <b>${targetQty}</b>\n` +
+          `⚡ Mode: <b>Manual Re-Order${isInverse ? ' (Inverse / Fade)' : ''}</b>`
+        );
+      }
 
       return {
         success: true,
         message: `✅ Order susulan ${sym} ${targetUserSide}${invTag} (${targetQty} koin @ $${markPrice}) berhasil masuk ke posisi akun Anda!`,
         position: newPos,
+        qty: targetQty,
+        price: markPrice,
       };
     }
 
@@ -3158,11 +3392,12 @@ export class CopyTradeEngine {
       throw new Error('API Key dan Secret Key Binance belum dikonfigurasi di dashboard.');
     }
 
+    const side: 'BUY' | 'SELL' = targetUserSide === 'LONG' ? 'BUY' : 'SELL';
+
     try {
       if (this.config.syncLeverage) {
         await binanceClient.setLeverage(sym, lev);
       }
-      const side: 'BUY' | 'SELL' = targetUserSide === 'LONG' ? 'BUY' : 'SELL';
       this.log('INFO', `⚡ [MANUAL RE-ORDER LIVE] Mengirim order susulan ke Binance: ${sym} ${side} ${targetQty} (${targetUserSide})...`);
       const orderRes = await binanceClient.placeMarketOrder(sym, side, targetQty, false, targetUserSide);
       
@@ -3173,25 +3408,36 @@ export class CopyTradeEngine {
       this.saveVirtualState();
 
       const invTag = isInverse ? ' [🔄 INVERSE]' : '';
-      this.log('SUCCESS', `✅ [MANUAL RE-ORDER${isInverse ? ' INVERSE' : ''} LIVE] Order susulan ${sym} ${side} BERHASIL MASUK ke Binance Futures! Order ID: ${orderRes.orderId}`);
-      this.sendTelegram(
-        `⚡ <b>SINKRONISASI ORDER SUSULAN BERHASIL [🟢 LIVE FUTURES${invTag}]</b>\n\n` +
-        `🪙 Simbol: <b>${sym}</b>\n` +
-        `📊 Arah Akun: <b>${targetUserSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi Fade Leader)</i>' : ''}\n` +
-        `👤 Arah Leader: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
-        `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
-        `📦 Kuantitas: <b>${targetQty}</b>\n` +
-        `⚡ Order ID: <code>${orderRes.orderId || 'OK'}</code>\n` +
-        `💡 Mode: <b>Manual Re-Order${isInverse ? ' (Inverse / Fade)' : ''}</b>`
-      );
+      this.log('SUCCESS', `✅ [${isAutoSniper ? 'AUTO-SNIPER' : 'MANUAL RE-ORDER'}${isInverse ? ' INVERSE' : ''} LIVE] Order susulan ${sym} ${side} BERHASIL MASUK ke Binance Futures! Order ID: ${orderRes.orderId}`);
+      if (!isAutoSniper) {
+        this.sendTelegram(
+          `⚡ <b>SINKRONISASI ORDER SUSULAN BERHASIL [🟢 LIVE FUTURES${invTag}]</b>\n\n` +
+          `🪙 Simbol: <b>${sym}</b>\n` +
+          `📊 Arah Akun: <b>${targetUserSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi Fade Leader)</i>' : ''}\n` +
+          `👤 Arah Leader: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+          `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+          `📦 Kuantitas: <b>${targetQty}</b>\n` +
+          `⚡ Order ID: <code>${orderRes.orderId || 'OK'}</code>\n` +
+          `💡 Mode: <b>Manual Re-Order${isInverse ? ' (Inverse / Fade)' : ''}</b>`
+        );
+      }
 
       return {
         success: true,
         message: `✅ Order susulan real ${sym} ${side} (${targetQty} koin) berhasil masuk ke Binance Futures! Order ID: ${orderRes.orderId}`,
+        qty: targetQty,
+        price: markPrice,
       };
     } catch (err: any) {
       const errMsg = err.response?.data?.msg || err.message;
       this.log('ERROR', `Gagal eksekusi order susulan di Binance: ${errMsg}`);
+      this.sendTelegram(
+        `⚠️ <b>ORDER SUSULAN GAGAL DIEKSEKUSI [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${sym}</b> (${targetUserSide})\n` +
+        `⚡ Aksi: Re-Order Susulan (${side} ${targetQty})\n` +
+        `❌ Error: <code>${errMsg}</code>\n` +
+        `💡 Tips: Periksa saldo margin USDT, leverage, atau batasan akun di Binance Anda.`
+      );
       throw new Error(errMsg);
     }
   }

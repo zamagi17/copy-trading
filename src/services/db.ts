@@ -87,6 +87,7 @@ export class DatabaseService {
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS schedule_aborted_at BIGINT DEFAULT 0;
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS last_leader_detail JSONB DEFAULT NULL;
           ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS last_user_balance JSONB DEFAULT NULL;
+          ALTER TABLE virtual_state ADD COLUMN IF NOT EXISTS slippage_skipped_orders JSONB DEFAULT '[]'::jsonb;
         `);
 
         // 3. Tabel Riwayat Transaksi Selesai
@@ -211,6 +212,19 @@ export class DatabaseService {
     if (dbCfg.reverseTrading === undefined && fileCfg.reverseTrading !== undefined) {
       merged.reverseTrading = fileCfg.reverseTrading;
     }
+    if (dbCfg.zeroSlippageOnly === undefined) {
+      merged.zeroSlippageOnly = fileCfg.zeroSlippageOnly !== undefined ? fileCfg.zeroSlippageOnly : true;
+    }
+    if (dbCfg.sniperPullbackEnabled === undefined) {
+      merged.sniperPullbackEnabled = fileCfg.sniperPullbackEnabled !== undefined ? fileCfg.sniperPullbackEnabled : true;
+    }
+
+    // Migrasi otomatis timezone CST -> WIB agar PostgreSQL tersinkronisasi
+    if (merged.weekendBreak) {
+      if (!merged.weekendBreak.timezone || merged.weekendBreak.timezone === 'CST') {
+        merged.weekendBreak.timezone = 'WIB';
+      }
+    }
 
     return merged as AppConfig;
   }
@@ -261,8 +275,8 @@ export class DatabaseService {
 
       if (vsRes.rows.length === 0 && localVsData) {
         await client.query(
-          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, updated_at)
-           VALUES (1, $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING;`,
+          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, slippage_skipped_orders, updated_at)
+           VALUES (1, $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING;`,
           [
             localVsData.virtualWalletBalance ?? 100,
             JSON.stringify(localVsData.virtualPositions || []),
@@ -270,6 +284,7 @@ export class DatabaseService {
             JSON.stringify(localVsData.positionAvgCounts || []),
             localVsData.lastProcessedOrderTime || 0,
             JSON.stringify(localVsData.processedOrderKeys || []),
+            JSON.stringify(localVsData.slippageSkippedOrders || []),
           ]
         );
         console.log('[Database] 📦 Migrasi virtual_state.json ke PostgreSQL selesai.');
@@ -288,6 +303,7 @@ export class DatabaseService {
                position_avg_counts = $4,
                last_processed_order_time = $5,
                processed_order_keys = $6,
+               slippage_skipped_orders = $7,
                updated_at = CURRENT_TIMESTAMP
              WHERE id = 1;`,
             [
@@ -297,6 +313,7 @@ export class DatabaseService {
               JSON.stringify(localVsData.positionAvgCounts || []),
               Math.max(localOrderTime, dbOrderTime),
               JSON.stringify(localVsData.processedOrderKeys || []),
+              JSON.stringify(localVsData.slippageSkippedOrders || []),
             ]
           );
           console.log('[Database] 🔄 virtual_state.json lebih baru. Disinkronkan ke PostgreSQL.');
@@ -306,6 +323,7 @@ export class DatabaseService {
             virtualPositions: row.virtual_positions || [],
             streamLeaderPositions: row.stream_leader_positions || [],
             positionAvgCounts: row.position_avg_counts || [],
+            slippageSkippedOrders: row.slippage_skipped_orders || [],
             lastProcessedOrderTime: Number(row.last_processed_order_time || 0),
             processedOrderKeys: Array.isArray(row.processed_order_keys) ? row.processed_order_keys : [],
           };
@@ -497,6 +515,7 @@ export class DatabaseService {
             virtualPositions: row.virtual_positions || [],
             streamLeaderPositions: row.stream_leader_positions || [],
             positionAvgCounts: row.position_avg_counts || [],
+            slippageSkippedOrders: row.slippage_skipped_orders || [],
             lastProcessedOrderTime: Number(row.last_processed_order_time || 0),
             processedOrderKeys: Array.isArray(row.processed_order_keys) ? row.processed_order_keys : [],
             isHolidayAborted: Boolean(row.is_holiday_aborted),
@@ -521,6 +540,7 @@ export class DatabaseService {
     virtualPositions: any[];
     streamLeaderPositions: any[];
     positionAvgCounts: any[];
+    slippageSkippedOrders?: any[];
     lastProcessedOrderTime: number;
     processedOrderKeys?: string[];
     isHolidayAborted?: boolean;
@@ -535,8 +555,8 @@ export class DatabaseService {
     if (this.isConnected && this.pool) {
       try {
         await this.pool.query(
-          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, is_holiday_aborted, holiday_aborted_reason, holiday_aborted_at, is_schedule_aborted, schedule_aborted_reason, schedule_aborted_at, last_leader_detail, last_user_balance, updated_at)
-           VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+          `INSERT INTO virtual_state (id, virtual_wallet_balance, virtual_positions, stream_leader_positions, position_avg_counts, last_processed_order_time, processed_order_keys, is_holiday_aborted, holiday_aborted_reason, holiday_aborted_at, is_schedule_aborted, schedule_aborted_reason, schedule_aborted_at, last_leader_detail, last_user_balance, slippage_skipped_orders, updated_at)
+           VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
            ON CONFLICT (id) DO UPDATE SET
              virtual_wallet_balance = $1,
              virtual_positions = $2,
@@ -552,6 +572,7 @@ export class DatabaseService {
              schedule_aborted_at = $12,
              last_leader_detail = COALESCE($13, virtual_state.last_leader_detail),
              last_user_balance = COALESCE($14, virtual_state.last_user_balance),
+             slippage_skipped_orders = $15,
              updated_at = CURRENT_TIMESTAMP;`,
           [
             data.virtualWalletBalance,
@@ -568,6 +589,7 @@ export class DatabaseService {
             Number(data.scheduleAbortedAt || 0),
             data.lastLeaderDetail ? JSON.stringify(data.lastLeaderDetail) : null,
             data.lastUserBalance ? JSON.stringify(data.lastUserBalance) : null,
+            JSON.stringify(data.slippageSkippedOrders || []),
           ]
         );
       } catch (e: any) {

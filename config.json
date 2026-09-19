@@ -13,6 +13,8 @@
   "maxSlippagePct": 0.5,
   "reverseTrading": false,
   "reorderWindowMinutes": 120,
+  "zeroSlippageOnly": true,
+  "sniperPullbackEnabled": true,
   "syncLeverage": true,
   "emergencySlPct": 80,
   "pollingIntervalMs": 1500,
@@ -25,7 +27,7 @@
   },
   "weekendBreak": {
     "enabled": true,
-    "timezone": "CST",
+    "timezone": "WIB",
     "standbyIntervalSec": 60,
     "blockNewTrades": true,
     "smartReEntryEnabled": true,

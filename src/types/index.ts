@@ -22,7 +22,7 @@ export interface AdaptivePollingConfig {
 
 export interface WeekendBreakConfig {
   enabled: boolean;
-  timezone: 'CST';             // UTC+8 China Standard Time (Waktu China)
+  timezone: 'WIB' | 'CST';     // UTC+7 Waktu Indonesia Barat (WIB)
   standbyIntervalSec: number;  // Interval polling saat libur (detik, default 60s)
   blockNewTrades: boolean;     // Menolak pembukaan posisi baru selama akhir pekan (default true)
   smartReEntryEnabled?: boolean;   // Izinkan buka kembali jika posisi baru ditutup/kena SL (default true)
@@ -31,17 +31,18 @@ export interface WeekendBreakConfig {
 }
 
 export interface WeekendBreakStatus {
-  isWeekendCST: boolean;       // Apakah saat ini Sabtu/Minggu Waktu China (CST UTC+8)
+  isWeekendWIB: boolean;       // Apakah saat ini Sabtu/Minggu Waktu Indonesia Barat (WIB UTC+7)
+  isWeekendCST?: boolean;      // Alias kompatibilitas
   hasOpenPositions: boolean;   // Apakah akun masih memiliki posisi terbuka
-  isHolidayActive: boolean;    // Libur aktif (akhir pekan CST & tidak ada posisi terbuka & luar window re-entry)
+  isHolidayActive: boolean;    // Libur aktif (akhir pekan WIB & tidak ada posisi terbuka & luar window re-entry)
   inReEntryWindow?: boolean;   // Sedang dalam jendela waktu tunggu toleransi re-entry
   reEntryRemainingMins?: number; // Sisa menit toleransi re-entry
   isHolidayAborted?: boolean;  // Mode libur dibatalkan karena terdeteksi transaksi dari leader
   abortedReason?: string;      // Alasan pembatalan libur (misal detail transaksi leader)
   abortedAt?: number;          // Timestamp pembatalan
-  cstTimeStr: string;          // Jam & Hari Waktu China saat ini
   wibTimeStr: string;          // Jam & Hari Waktu WIB saat ini
-  resumeTimeStr: string;       // Jadwal selesai libur (Senin 00:00 CST / Minggu 23:00 WIB)
+  cstTimeStr?: string;         // Alias kompatibilitas
+  resumeTimeStr: string;       // Jadwal selesai libur (Senin 00:00 WIB)
 }
 
 export interface PollingStatusInfo {
@@ -91,6 +92,8 @@ export interface AppConfig {
   maxSlippagePct: number;
   reverseTrading?: boolean; // Mode inverse trading (Leader Long -> User Short, Leader Short -> User Long)
   reorderWindowMinutes?: number; // Batas toleransi waktu order susulan (re-order) dalam satuan menit (default: 30)
+  zeroSlippageOnly?: boolean; // Hanya izinkan eksekusi jika harga sama atau lebih menguntungkan dari leader (Slippage 0 atau Plus)
+  sniperPullbackEnabled?: boolean; // Otomatis mengeksekusi order tertahan saat harga pullback ke entry leader (default true)
   syncLeverage: boolean;
   emergencySlPct: number;
   pollingIntervalMs: number;
@@ -201,6 +204,10 @@ export interface SkippedOrderInfo {
   leaderEntryPrice: number;
   markPrice: number;
   slippagePct: number;
+  adverseSlippagePct?: number;
+  targetPullbackPrice?: number;
+  isSniperPending?: boolean;
+  notifiedSniper?: boolean;
   skippedAt: number;
   reason?: string;
 }

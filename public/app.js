@@ -172,6 +172,10 @@ const I18N = {
     label_reorder_window: 'Batas Toleransi Waktu Re-Order (Menit):',
     hint_reorder_window: 'Batas waktu toleransi order susulan yang terlewat (misal: 30 menit, 60 menit, 120 menit = 2 jam).',
     check_sync_leverage: 'Otomatis Sinkronkan Leverage & Margin Mode Leader (10x/20x Cross)',
+    check_sniper_pullback: '🎯 Auto-Sniper Pullback (Otomatis Masuk Saat Harga Pullback ke Entry Leader / Diskon)',
+    hint_sniper_pullback: 'Jika harga saat order terdeteksi lebih buruk (kemahalan), order otomatis ditahan sementara. Bot memantau pergerakan harga setiap detik dan akan otomatis mengeksekusi seketika harga pullback kembali menyentuh harga entry leader atau lebih murah.',
+    check_zero_slippage_only: '🛡️ Disiplin Ketat: Hanya Eksekusi di Slippage 0 atau Plus (Diskon)',
+    hint_zero_slippage_only: '100% menolak harga yang lebih buruk dari entry leader. Akun Anda hanya akan masuk jika harga sama persis atau lebih murah/menguntungkan (Slippage 0 / Diskon).',
     check_reverse_trading: '🔄 Mode Reverse Trading / Fade Leader (Posisi Terbalik)',
     hint_reverse_trading: 'Jika aktif, bot mengambil arah berlawanan (Leader LONG ➔ Akun SHORT, Leader SHORT ➔ Akun LONG). Berlaku hanya untuk posisi baru. Averaging down & penutupan tetap selaras dengan posisi aktif akun Anda.',
     legend_proxy: 'Residential Proxy (Anti Blokir Cloudflare)',
@@ -245,10 +249,10 @@ const I18N = {
     badge_current_wib: 'Waktu WIB:',
     spec_polling_adaptive_prefix: 'Adaptif WIB',
 
-    legend_weekend_break: 'Opsi Libur Akhir Pekan (Waktu China CST UTC+8)',
-    check_weekend_break: 'Aktifkan Libur Sabtu & Minggu (Waktu China CST UTC+8)',
-    hint_weekend_break_intro: 'Disesuaikan dengan lead trader China. Libur otomatis berlaku jika tidak ada posisi yang terbuka.',
-    weekend_info_explanation: 'Jadwal Libur: Jumat 23:00 WIB (Sabtu 00:00 CST) s/d Minggu 23:00 WIB (Senin 00:00 CST). Aturan Keamanan: Jika akhir pekan tiba namun akun masih memiliki posisi terbuka, bot tetap aktif mengawal hingga posisi tertutup. Begitu bersih (0 posisi), bot otomatis beristirahat & melambatkan polling.',
+    legend_weekend_break: 'Opsi Libur Akhir Pekan (Waktu WIB UTC+7)',
+    check_weekend_break: 'Aktifkan Libur Sabtu & Minggu (Waktu WIB UTC+7)',
+    hint_weekend_break_intro: 'Libur otomatis berlaku jika tidak ada posisi yang terbuka pada hari Sabtu & Minggu (WIB).',
+    weekend_info_explanation: 'Jadwal Libur: Sabtu 00:00 WIB s/d Minggu 23:59 WIB (Buka Kembali: Senin 00:00 WIB). Aturan Keamanan: Jika akhir pekan tiba namun akun masih memiliki posisi terbuka, bot tetap aktif mengawal hingga posisi tertutup. Begitu bersih (0 posisi), bot otomatis beristirahat & melambatkan polling.',
     label_weekend_standby_interval: 'Interval Standby saat Libur (Hemat Kuota):',
     opt_weekend_30: '⏱️ 30 Detik (Santai)',
     opt_weekend_60: '🛡️ 60 Detik (Optimal Seimbang - Rekomendasi)',
@@ -266,11 +270,11 @@ const I18N = {
     opt_reentry_60: '🛡️ 60 Menit (Maksimal)',
     status_weekend_reentry: 'TOLERANSI RE-ENTRY',
     spec_weekend_label: 'Libur Akhir Pekan:',
-    spec_weekend_active: 'Aktif (Waktu China)',
+    spec_weekend_active: 'Aktif (Waktu WIB)',
     spec_weekend_disabled: 'Nonaktif (24/7)',
-    status_weekend_holiday: 'LIBUR AKHIR PEKAN (CST)',
+    status_weekend_holiday: 'LIBUR AKHIR PEKAN (WIB)',
     status_weekend_pending: 'MENUNGGU TUTUP POSISI',
-    badge_current_cst: 'China CST:',
+    badge_current_cst: 'WIB:',
 
     btn_test_trade: 'Uji Eksekusi',
     btn_test_trade_title: 'Uji Coba Eksekusi Order',
@@ -281,7 +285,7 @@ const I18N = {
     label_test_amount: 'Nominal Modal Uji Coba (USDT):',
     hint_test_amount: 'Nominal margin USDT untuk membuka posisi uji coba ini.',
     check_bypass_weekend: 'Bypass Libur Akhir Pekan',
-    hint_bypass_weekend: 'Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan CST menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.',
+    hint_bypass_weekend: 'Jika tidak dicentang, sistem memvalidasi apakah aturan Libur Akhir Pekan WIB menolak order saat libur. Jika dicentang, order dipaksa masuk untuk menguji tabel posisi.',
     btn_run_test_trade: 'Eksekusi Order Uji Coba',
     btn_schedule: 'Jadwal Istirahat',
     schedule_modal_title: 'Jadwal Istirahat / Auto Pause Polling',
@@ -440,6 +444,10 @@ const I18N = {
     label_reorder_window: 'Re-Order Tolerance Window (Minutes):',
     hint_reorder_window: 'Time tolerance limit for skipped catch-up orders (e.g., 30 mins, 60 mins, 120 mins = 2 hours).',
     check_sync_leverage: 'Auto Sync Leader Leverage & Margin Mode (10x/20x Cross)',
+    check_sniper_pullback: '🎯 Auto-Sniper Pullback (Auto-Execute on Pullback to Leader Entry / Discount)',
+    hint_sniper_pullback: 'If the market price moves worse (adverse slippage), the order is held. The bot monitors the price every second and auto-executes once price pulls back to leader entry or cheaper.',
+    check_zero_slippage_only: '🛡️ Strict Discipline: Only Execute at Zero or Positive Slippage (Discount)',
+    hint_zero_slippage_only: '100% rejects any price worse than leader entry. Your account will only fill if the price is identical or better/discounted (Zero/Positive Slippage).',
     check_reverse_trading: '🔄 Reverse Trading Mode / Fade Leader (Opposite Position)',
     hint_reverse_trading: 'When enabled, bot opens opposite positions (Leader LONG ➔ User SHORT, Leader SHORT ➔ User LONG). Applies strictly to newly opened positions. Averaging down & closes remain aligned with your active position.',
     legend_proxy: 'Residential Proxy (Cloudflare Bypass)',
@@ -513,10 +521,10 @@ const I18N = {
     badge_current_wib: 'Current WIB Time:',
     spec_polling_adaptive_prefix: 'Adaptive WIB',
 
-    legend_weekend_break: 'Weekend Holiday Mode (China CST Time UTC+8)',
-    check_weekend_break: 'Enable Saturday & Sunday Holiday (China CST Time UTC+8)',
-    hint_weekend_break_intro: 'Synchronized with China lead traders. Automatically pauses only when there are NO open positions.',
-    weekend_info_explanation: 'Holiday Schedule: Friday 23:00 WIB (Saturday 00:00 CST) until Sunday 23:00 WIB (Monday 00:00 CST). Safety Rule: If positions are still open during the weekend, the bot remains active to guard them until closed. Once clear (0 positions), it enters holiday standby and slows polling.',
+    legend_weekend_break: 'Weekend Holiday Mode (WIB Time UTC+7)',
+    check_weekend_break: 'Enable Saturday & Sunday Holiday (WIB Time UTC+7)',
+    hint_weekend_break_intro: 'Automatically pauses trading on weekends only when there are NO open positions (WIB).',
+    weekend_info_explanation: 'Holiday Schedule: Saturday 00:00 WIB until Sunday 23:59 WIB (Resumes: Monday 00:00 WIB). Safety Rule: If positions are still open during the weekend, the bot remains active to guard them until closed. Once clear (0 positions), it enters holiday standby and slows polling.',
     label_weekend_standby_interval: 'Standby Polling Interval during Holiday:',
     opt_weekend_30: '⏱️ 30 Seconds (Relaxed)',
     opt_weekend_60: '🛡️ 60 Seconds (Optimal Balance - Recommended)',
@@ -534,11 +542,11 @@ const I18N = {
     opt_reentry_60: '🛡️ 60 Minutes (Maximum)',
     status_weekend_reentry: 'RE-ENTRY GRACE PERIOD',
     spec_weekend_label: 'Weekend Holiday:',
-    spec_weekend_active: 'Active (China Time)',
+    spec_weekend_active: 'Active (WIB Time)',
     spec_weekend_disabled: 'Disabled (24/7)',
-    status_weekend_holiday: 'WEEKEND HOLIDAY (CST)',
+    status_weekend_holiday: 'WEEKEND HOLIDAY (WIB)',
     status_weekend_pending: 'WAITING POSITION CLOSE',
-    badge_current_cst: 'China CST Time:',
+    badge_current_cst: 'WIB Time:',
 
     btn_test_trade: 'Test Trade',
     btn_test_trade_title: 'Test Order Execution',
@@ -549,7 +557,7 @@ const I18N = {
     label_test_amount: 'Test Margin Amount (USDT):',
     hint_test_amount: 'USDT margin amount to open this test position.',
     check_bypass_weekend: 'Bypass Weekend Holiday',
-    hint_bypass_weekend: 'If unchecked, tests whether the China CST weekend holiday rule blocks orders during weekend. If checked, forces order entry to test the position table.',
+    hint_bypass_weekend: 'If unchecked, tests whether the WIB weekend holiday rule blocks orders during weekend. If checked, forces order entry to test the position table.',
     btn_run_test_trade: 'Execute Test Order',
     btn_schedule: 'Sleep Schedule',
     schedule_modal_title: 'Sleep Schedule / Auto Pause Polling',
@@ -764,6 +772,8 @@ const inputMaxSlippage = document.getElementById('inputMaxSlippage');
 const inputEmergencySl = document.getElementById('inputEmergencySl');
 const inputReorderWindow = document.getElementById('inputReorderWindow');
 const checkSyncLeverage = document.getElementById('checkSyncLeverage');
+const checkSniperPullback = document.getElementById('checkSniperPullback');
+const checkZeroSlippageOnly = document.getElementById('checkZeroSlippageOnly');
 const checkReverseTrading = document.getElementById('checkReverseTrading');
 const checkProxyEnabled = document.getElementById('checkProxyEnabled');
 const inputProxyHost = document.getElementById('inputProxyHost');
@@ -1116,8 +1126,8 @@ function updateEngineUI(status) {
       holidayBadge.style.background = 'rgba(16, 185, 129, 0.15)';
       holidayBadge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
       holidayBadge.style.color = '#34d399';
-      if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_holiday', 'LIBUR AKHIR PEKAN (CST)');
-      holidayBadge.title = `Mode Libur Aktif (${wb.cstTimeStr}). Standby polling aktif. Buka kembali: ${wb.resumeTimeStr}`;
+      if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_holiday', 'LIBUR AKHIR PEKAN (WIB)');
+      holidayBadge.title = `Mode Libur Aktif (${wb.wibTimeStr || wb.cstTimeStr}). Standby polling aktif. Buka kembali: ${wb.resumeTimeStr}`;
       if (icon) icon.setAttribute('data-lucide', 'palmtree');
     } else if (wb.isHolidayAborted && isEngineActive) {
       holidayBadge.style.display = 'flex';
@@ -1135,13 +1145,13 @@ function updateEngineUI(status) {
       if (holidayBadgeText) holidayBadgeText.innerText = `🎯 RE-ENTRY GRACE (${wb.reEntryRemainingMins || 30}M)`;
       holidayBadge.title = `Jendela Toleransi Smart Re-Entry Aktif: Bot siaga menangkap re-entry leader dalam ${wb.reEntryRemainingMins} menit ke depan sebelum libur.`;
       if (icon) icon.setAttribute('data-lucide', 'target');
-    } else if (wb.isWeekendCST && wb.hasOpenPositions && isEngineActive) {
+    } else if ((wb.isWeekendWIB || wb.isWeekendCST) && wb.hasOpenPositions && isEngineActive) {
       holidayBadge.style.display = 'flex';
       holidayBadge.style.background = 'rgba(234, 179, 8, 0.15)';
       holidayBadge.style.borderColor = 'rgba(234, 179, 8, 0.4)';
       holidayBadge.style.color = '#fde047';
       if (holidayBadgeText) holidayBadgeText.innerText = t('status_weekend_pending', 'MENUNGGU TUTUP POSISI');
-      holidayBadge.title = `Akhir pekan Waktu China, bot tetap aktif mengawal posisi terbuka sebelum libur.`;
+      holidayBadge.title = `Akhir pekan Waktu WIB, bot tetap aktif mengawal posisi terbuka sebelum libur.`;
       if (icon) icon.setAttribute('data-lucide', 'shield');
     } else {
       holidayBadge.style.display = 'none';
@@ -1341,7 +1351,7 @@ function updateConfigSpecs(cfg) {
   // 9. Weekend Break Mode Spec
   if (specWeekendBreak) {
     if (cfg.weekendBreak?.enabled !== false) {
-      specWeekendBreak.innerText = t('spec_weekend_active', 'Aktif (Waktu China)');
+      specWeekendBreak.innerText = t('spec_weekend_active', 'Aktif (Waktu WIB)');
       specWeekendBreak.className = 'spec-value text-green';
     } else {
       specWeekendBreak.innerText = t('spec_weekend_disabled', 'Nonaktif (24/7)');
@@ -1659,7 +1669,14 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
           `</div>`;
       }
 
-      syncBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>${actionBtn}`;
+      const targetOp = side === 'LONG' ? '≤' : '≥';
+      const targetPrice = skippedItem?.targetPullbackPrice || skippedItem?.leaderEntryPrice || 0;
+      let statusBadge = `<span class="badge badge-yellow">${t('badge_waiting_sync', 'MENUNGGU SINKRON')}</span>`;
+      if (skippedItem?.isSniperPending) {
+        statusBadge = `<span class="badge badge-purple" title="${currentLang === 'en' ? `Auto-Sniper active: automatically fills on pullback to ${targetOp} $${formatPrice(targetPrice)}` : `Auto-Sniper aktif: memantau chart dan otomatis mengeksekusi saat harga pullback ke ${targetOp} $${formatPrice(targetPrice)}`}">🎯 SNIPER (${targetOp} $${formatPrice(targetPrice)})</span>`;
+      }
+
+      syncBadge = `${statusBadge}${actionBtn}`;
     }
 
     // Cari entry leader dan volume dari lp atau dari riwayat orders stream
@@ -2155,6 +2172,8 @@ function openSettingsModal() {
   inputEmergencySl.value = currentConfig.emergencySlPct ?? 10;
   if (inputReorderWindow) inputReorderWindow.value = currentConfig.reorderWindowMinutes ?? 30;
   checkSyncLeverage.checked = currentConfig.syncLeverage ?? true;
+  if (checkSniperPullback) checkSniperPullback.checked = currentConfig.sniperPullbackEnabled ?? true;
+  if (checkZeroSlippageOnly) checkZeroSlippageOnly.checked = currentConfig.zeroSlippageOnly ?? true;
   if (checkReverseTrading) checkReverseTrading.checked = currentConfig.reverseTrading ?? false;
 
   // Proxy
@@ -2264,7 +2283,7 @@ async function executeTestTrade() {
         testTradeAlertBox.style.background = 'rgba(234, 179, 8, 0.15)';
         testTradeAlertBox.style.border = '1px solid rgba(234, 179, 8, 0.4)';
         testTradeAlertBox.style.color = '#fde047';
-        testTradeAlertBox.innerHTML = `<strong>🌴 DITOLAK OLEH ATURAN LIBUR CST!</strong><br>${data.message}`;
+        testTradeAlertBox.innerHTML = `<strong>🌴 DITOLAK OLEH ATURAN LIBUR WIB!</strong><br>${data.message}`;
       } else {
         testTradeAlertBox.style.background = 'rgba(239, 68, 68, 0.15)';
         testTradeAlertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
@@ -2319,12 +2338,10 @@ function toggleWeekendBreakInputs() {
   }
   const now = new Date();
   const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const cstTime = new Date(utcMs + (8 * 3600000));
   const wibTime = new Date(utcMs + (7 * 3600000));
   const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  const cstStr = `${days[cstTime.getDay()]}, ${String(cstTime.getHours()).padStart(2, '0')}:${String(cstTime.getMinutes()).padStart(2, '0')} CST`;
   const wibStr = `${days[wibTime.getDay()]}, ${String(wibTime.getHours()).padStart(2, '0')}:${String(wibTime.getMinutes()).padStart(2, '0')} WIB`;
-  if (weekendModalCstClock) weekendModalCstClock.innerText = `China: ${cstStr}`;
+  if (weekendModalCstClock) weekendModalCstClock.innerText = `WIB: ${wibStr}`;
   if (weekendModalWibClock) weekendModalWibClock.innerText = `WIB: ${wibStr}`;
   if (weekendModalStatusBadge) {
     const wb = currentStatus?.weekendBreak;
@@ -2332,12 +2349,12 @@ function toggleWeekendBreakInputs() {
       weekendModalStatusBadge.innerText = 'Libur Dibatalkan (Leader Aktif)';
       weekendModalStatusBadge.className = 'badge badge-amber';
     } else {
-      const isWeekend = cstTime.getDay() === 0 || cstTime.getDay() === 6;
+      const isWeekend = wibTime.getDay() === 0 || wibTime.getDay() === 6;
       if (isWeekend) {
-        weekendModalStatusBadge.innerText = 'Akhir Pekan CST';
+        weekendModalStatusBadge.innerText = 'Akhir Pekan WIB';
         weekendModalStatusBadge.className = 'badge badge-emerald';
       } else {
-        weekendModalStatusBadge.innerText = 'Hari Kerja CST (Aktif)';
+        weekendModalStatusBadge.innerText = 'Hari Kerja WIB (Aktif)';
         weekendModalStatusBadge.className = 'badge badge-sky';
       }
     }
@@ -2439,7 +2456,7 @@ async function saveSettings() {
     },
     weekendBreak: {
       enabled: checkWeekendBreak ? checkWeekendBreak.checked : true,
-      timezone: 'CST',
+      timezone: 'WIB',
       standbyIntervalSec: parseInt(selectWeekendStandbyInterval?.value || '60') || 60,
       blockNewTrades: checkBlockWeekendNewTrades ? checkBlockWeekendNewTrades.checked : true,
       smartReEntryEnabled: checkSmartReEntry ? checkSmartReEntry.checked : true,
@@ -2453,6 +2470,8 @@ async function saveSettings() {
     emergencySlPct: parseFloat(inputEmergencySl.value) || 10,
     reorderWindowMinutes: inputReorderWindow ? (parseInt(inputReorderWindow.value) || 30) : 30,
     syncLeverage: checkSyncLeverage.checked,
+    sniperPullbackEnabled: checkSniperPullback ? checkSniperPullback.checked : true,
+    zeroSlippageOnly: checkZeroSlippageOnly ? checkZeroSlippageOnly.checked : true,
     reverseTrading: checkReverseTrading ? checkReverseTrading.checked : false,
     proxy: {
       enabled: checkProxyEnabled.checked,
