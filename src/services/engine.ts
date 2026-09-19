@@ -2188,6 +2188,16 @@ export class CopyTradeEngine {
         const windowMins = this.config.reorderWindowMinutes || 30;
         const targetOp = userPositionSide === 'LONG' ? '≤' : '≥';
         const invTag = isInverse ? ' (🔄 Inversi)' : '';
+        const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || leaderPos.markPrice > 0))
+          ? (leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)) / Math.max(1, leaderPos.leverage || 10)
+          : 0;
+        const sniperEstMargin = (this.config.mode === 'FIXED_AMOUNT'
+          ? this.config.fixedAmountUsdt
+          : (this.config.mode === 'FIXED_RATIO'
+            ? userBalance * 0.05 * this.config.ratioMultiplier
+            : (userBalance / (this.lastLeaderEquity || 50000)) * this.config.ratioMultiplier * leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)
+          )) / Math.max(1, leaderPos.leverage || 10);
+
         this.log('WARN', `🎯 [AUTO-SNIPER AKTIF] Order ${leaderPos.symbol} (${userPositionSide}${invTag}) ditahan: Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dibanding entry leader ($${leaderPos.entryPrice}). Bot otomatis memantau pullback ke ${targetOp} $${leaderPos.entryPrice} selama ${windowMins} menit.`);
         this.sendTelegramRateLimited(
           `SNIPER_PENDING_${posKey}`,
@@ -2196,8 +2206,11 @@ export class CopyTradeEngine {
           `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${invTag}\n` +
           `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
           `📈 Harga Pasar Saat Ini: <b>$${leaderPos.markPrice}</b>\n` +
-          `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n\n` +
-          `🛡️ <i>Sistem menahan order demi memastikan Slippage 0 / Diskon. Bot memantau chart setiap detik dan akan <b>OTOMATIS MASUK</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b> (sisa batas toleransi ${windowMins} menit).</i>`,
+          `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n` +
+          `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+          `💰 Estimasi Margin Order: <b>$${Math.max(5, sniperEstMargin).toFixed(2)} USDT</b>\n` +
+          (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
+          `\n🛡️ <i>Sistem menahan order demi memastikan Slippage 0 / Diskon. Bot memantau chart setiap detik dan akan <b>OTOMATIS MASUK</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b> (sisa batas toleransi ${windowMins} menit).</i>`,
           60000
         );
         return null;
@@ -2278,6 +2291,7 @@ export class CopyTradeEngine {
       this.saveVirtualState();
       const modeTag = isInverse ? '🧪 SIMULASI - 🔄 INVERSE' : '🧪 SIMULASI';
       const discountTag = favorableSlippagePct > 0 ? ` [🔥 DISKON +${favorableSlippagePct.toFixed(2)}% LEBIH MURAH!]` : '';
+      const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || markPrice > 0)) ? (leaderPos.amount * (leaderPos.entryPrice || markPrice)) / Math.max(1, leaderPos.leverage || 10) : 0;
       this.log('SUCCESS', `[${modeTag}] Order virtual BERHASIL DIBUKA: ${side} ${targetQty} ${leaderPos.symbol} (${userPositionSide}) @ $${markPrice}${discountTag} (Estimasi Margin: $${estMargin.toFixed(2)} USDT, Leverage: ${lev}x)`);
       this.sendTelegram(
         `🚀 <b>ORDER COPY TRADE DIBUKA [${modeTag}]</b>\n\n` +
@@ -2285,12 +2299,13 @@ export class CopyTradeEngine {
         `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi Fade Leader)</i>' : ''}\n` +
         `👤 Arah Leader: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
         (leaderPos.entryPrice > 0 ? `🎯 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` : '') +
-        `💵 Entry: <b>$${markPrice}</b>\n` +
+        `💵 Entry Anda: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         (favorableSlippagePct > 0 ? `🔥 Slippage Plus: <b>Diskon +${favorableSlippagePct.toFixed(2)}% Lebih Murah dari Leader!</b>\n` : '') +
-        `📦 Volume: <b>${targetQty}</b>\n` +
+        `📦 Volume Anda: <b>${targetQty}</b>` + (leaderPos.amount > 0 ? ` <i>(Leader: ${leaderPos.amount})</i>` : '') + `\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
-        `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
+        `💰 Margin Akun Anda: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
+        (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
       return virtualPos;
@@ -2308,6 +2323,7 @@ export class CopyTradeEngine {
       const orderRes = await binanceClient.placeMarketOrder(leaderPos.symbol, side, targetQty, false, userPositionSide);
       this.log('SUCCESS', `✅ Order BERHASIL dieksekusi! ID: ${orderRes.orderId || 'OK'} (${side} ${targetQty} ${leaderPos.symbol} ${userPositionSide})`);
       const estMargin = (targetQty * markPrice) / (leaderPos.leverage || 10);
+      const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || markPrice > 0)) ? (leaderPos.amount * (leaderPos.entryPrice || markPrice)) / Math.max(1, leaderPos.leverage || 10) : 0;
       const title = isAveragingDown
         ? 'ORDER AVERAGING DOWN [🟢 LIVE FUTURES]'
         : (isInverse ? 'ORDER COPY TRADE DIBUKA [🟢 LIVE - 🔄 INVERSE]' : 'ORDER COPY TRADE DIBUKA [🟢 LIVE FUTURES]');
@@ -2317,12 +2333,13 @@ export class CopyTradeEngine {
         `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi Fade Leader)</i>' : ''}\n` +
         `👤 Arah Leader: <b>${leaderPos.positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
         (leaderPos.entryPrice > 0 ? `🎯 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` : '') +
-        `💵 Entry: <b>$${markPrice}</b>\n` +
+        `💵 Entry Anda: <b>$${markPrice}</b>\n` +
         `📍 Harga Mark: <b>$${markPrice}</b>\n` +
         (favorableSlippagePct > 0 ? `🔥 Slippage Plus: <b>Diskon +${favorableSlippagePct.toFixed(2)}% Lebih Murah dari Leader!</b>\n` : '') +
-        `📦 Volume: <b>${targetQty}</b>\n` +
+        `📦 Volume Anda: <b>${targetQty}</b>` + (leaderPos.amount > 0 ? ` <i>(Leader: ${leaderPos.amount})</i>` : '') + `\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x (${leaderPos.marginType || 'CROSSED'})</b>\n` +
-        `💰 Estimasi Margin: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
+        `💰 Margin Akun Anda: <b>$${estMargin.toFixed(2)} USDT</b>\n` +
+        (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
 
@@ -2481,6 +2498,9 @@ export class CopyTradeEngine {
       existingUserPos.avgCount = counts.user;
       this.virtualPositions.set(userKey, existingUserPos);
       this.saveVirtualState();
+      const addMargin = (addQty * markPrice) / lev;
+      const newTotalMargin = (newQty * newEntry) / lev;
+      const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || markPrice > 0)) ? (leaderPos.amount * (leaderPos.entryPrice || markPrice)) / Math.max(1, leaderPos.leverage || 10) : 0;
       this.log('SUCCESS', `🧪 [MODE SIMULASI] Virtual Averaging Berhasil (ke-${counts.user}x): ${leaderPos.symbol} (${existingUserPos.positionSide}) (+${addQty}, total: ${newQty.toFixed(4)} @ $${newEntry.toFixed(2)})`);
       this.sendTelegram(
         `➕ <b>ORDER AVERAGING DOWN [🧪 SIMULASI]</b>\n\n` +
@@ -2492,6 +2512,9 @@ export class CopyTradeEngine {
         `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
         `📦 Tambahan Volume: <b>+${addQty}</b> (Total: ${newQty.toFixed(4)})\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+        `💵 Tambahan Margin: <b>+$${addMargin.toFixed(2)} USDT</b>\n` +
+        `💰 Total Margin Posisi: <b>$${newTotalMargin.toFixed(2)} USDT</b>\n` +
+        (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
       return { addedQty: addQty, newTotalQty: newQty, newEntryPrice: newEntry };
@@ -2525,6 +2548,10 @@ export class CopyTradeEngine {
       existingUserPos.margin = (newQty * newEntry) / lev;
       existingUserPos.avgCount = nextUserCount;
 
+      const addMargin = (addQty * markPrice) / lev;
+      const newTotalMargin = (newQty * newEntry) / lev;
+      const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || markPrice > 0)) ? (leaderPos.amount * (leaderPos.entryPrice || markPrice)) / Math.max(1, leaderPos.leverage || 10) : 0;
+
       this.log('SUCCESS', `✅ Berhasil menambah posisi (Averaging Down ke-${nextUserCount}x) ${leaderPos.symbol} (${userSide}, +${addQty})`);
       this.sendTelegram(
         `➕ <b>ORDER AVERAGING DOWN [🟢 LIVE FUTURES]</b>\n\n` +
@@ -2536,6 +2563,9 @@ export class CopyTradeEngine {
         `🎯 Entry Price Baru: <b>$${newEntry.toFixed(2)}</b>\n` +
         `📦 Tambahan Volume: <b>+${addQty}</b> (Total: ${newQty.toFixed(4)})\n` +
         `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+        `💵 Tambahan Margin: <b>+$${addMargin.toFixed(2)} USDT</b>\n` +
+        `💰 Total Margin Posisi: <b>$${newTotalMargin.toFixed(2)} USDT</b>\n` +
+        (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
         `👤 Target Leader: <code>${this.config.portfolioId}</code>`
       );
       return { addedQty: addQty, newTotalQty: newQty, newEntryPrice: newEntry };
@@ -3056,6 +3086,11 @@ export class CopyTradeEngine {
             if (res.success) {
               const executedPrice = res.price || markPrice;
               const executedQty = res.qty || 0;
+              const lev = leaderPos?.leverage || 10;
+              const usedMargin = (executedQty * executedPrice) / lev;
+              const leaderMargin = (leaderPos && leaderPos.amount > 0 && leaderPos.entryPrice > 0)
+                ? (leaderPos.amount * leaderPos.entryPrice) / Math.max(1, leaderPos.leverage || 10)
+                : 0;
               const discountText = discountPct > 0
                 ? `🔥 Diskon +${discountPct.toFixed(2)}% Lebih Murah dari Leader!`
                 : `0.00% (Identik Harga Leader)`;
@@ -3068,6 +3103,9 @@ export class CopyTradeEngine {
                 `🎯 Entry Akun Anda: <b>$${executedPrice}</b>\n` +
                 `🔥 Hasil Slippage: <b>${discountText}</b>\n` +
                 `📦 Kuantitas: <b>${executedQty}</b>\n` +
+                `⚡ Leverage: <b>${lev}x</b>\n` +
+                `💰 Margin Terpakai: <b>$${usedMargin.toFixed(2)} USDT</b>\n` +
+                (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
                 `⚡ Mode: <b>Auto-Sniper Pullback Fill</b>`
               );
             }
@@ -3080,12 +3118,25 @@ export class CopyTradeEngine {
             if (res.success) {
               this.slippageSkippedOrders.delete(posKey);
               this.saveVirtualState();
+              const addedQty = res.addQty || 0;
+              const lev = leaderPos?.leverage || 10;
+              const addedMargin = (addedQty * markPrice) / lev;
+              const { userPos } = this.getUserPositionForLeader(item.symbol, item.positionSide, userPositionsMap);
+              const totalMargin = userPos ? Math.abs(userPos.margin || (Math.abs(userPos.positionAmt) * (userPos.entryPrice || markPrice)) / lev) : addedMargin;
+              const leaderMargin = (leaderPos && leaderPos.amount > 0 && leaderPos.entryPrice > 0)
+                ? (leaderPos.amount * leaderPos.entryPrice) / Math.max(1, leaderPos.leverage || 10)
+                : 0;
+
               this.sendTelegram(
                 `🎯 <b>AUTO-SNIPER AVERAGING DOWN MATCH! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +
                 `🪙 Simbol: <b>${item.symbol}</b> (${targetUserSide})\n` +
                 `👤 Entry Leader: <b>$${targetPrice}</b>\n` +
                 `🎯 Harga Eksekusi: <b>$${markPrice}</b>\n` +
-                `📦 Tambahan Volume: <b>+${res.addQty || 0}</b>\n` +
+                `📦 Tambahan Volume: <b>+${addedQty}</b>\n` +
+                `⚡ Leverage: <b>${lev}x</b>\n` +
+                `💵 Tambahan Margin: <b>+$${addedMargin.toFixed(2)} USDT</b>\n` +
+                `💰 Total Margin Posisi: <b>$${totalMargin.toFixed(2)} USDT</b>\n` +
+                (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
                 `⚡ Mode: <b>Auto-Sniper Pullback Averaging</b>`
               );
             }
@@ -3394,6 +3445,10 @@ export class CopyTradeEngine {
       this.saveVirtualState();
 
       const invTag = isInverse ? ' (🔄 Inversi/Fade)' : '';
+      const usedMargin = (targetQty * markPrice) / lev;
+      const leaderMargin = (leaderPos && leaderPos.amount > 0 && leaderPos.entryPrice > 0)
+        ? (leaderPos.amount * leaderPos.entryPrice) / Math.max(1, leaderPos.leverage || 10)
+        : 0;
       this.log('SUCCESS', `🧪 [${isAutoSniper ? 'AUTO-SNIPER' : 'MANUAL RE-ORDER'}${isInverse ? ' INVERSE' : ''} SIMULASI] Berhasil eksekusi order susulan ${sym} ${targetUserSide}${invTag} (${targetQty} koin @ $${markPrice})!`);
       if (!isAutoSniper) {
         this.sendTelegram(
@@ -3403,6 +3458,9 @@ export class CopyTradeEngine {
           `👤 Arah Leader: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
           `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
           `📦 Kuantitas: <b>${targetQty}</b>\n` +
+          `⚡ Leverage: <b>${lev}x</b>\n` +
+          `💰 Margin Terpakai: <b>$${usedMargin.toFixed(2)} USDT</b>\n` +
+          (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
           `⚡ Mode: <b>Manual Re-Order${isInverse ? ' (Inverse / Fade)' : ''}</b>`
         );
       }
@@ -3437,6 +3495,10 @@ export class CopyTradeEngine {
       this.saveVirtualState();
 
       const invTag = isInverse ? ' [🔄 INVERSE]' : '';
+      const usedMargin = (targetQty * markPrice) / lev;
+      const leaderMargin = (leaderPos && leaderPos.amount > 0 && leaderPos.entryPrice > 0)
+        ? (leaderPos.amount * leaderPos.entryPrice) / Math.max(1, leaderPos.leverage || 10)
+        : 0;
       this.log('SUCCESS', `✅ [${isAutoSniper ? 'AUTO-SNIPER' : 'MANUAL RE-ORDER'}${isInverse ? ' INVERSE' : ''} LIVE] Order susulan ${sym} ${side} BERHASIL MASUK ke Binance Futures! Order ID: ${orderRes.orderId}`);
       if (!isAutoSniper) {
         this.sendTelegram(
@@ -3446,6 +3508,9 @@ export class CopyTradeEngine {
           `👤 Arah Leader: <b>${positionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
           `💵 Harga Eksekusi: <b>$${markPrice}</b>\n` +
           `📦 Kuantitas: <b>${targetQty}</b>\n` +
+          `⚡ Leverage: <b>${lev}x</b>\n` +
+          `💰 Margin Terpakai: <b>$${usedMargin.toFixed(2)} USDT</b>\n` +
+          (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
           `⚡ Order ID: <code>${orderRes.orderId || 'OK'}</code>\n` +
           `💡 Mode: <b>Manual Re-Order${isInverse ? ' (Inverse / Fade)' : ''}</b>`
         );
