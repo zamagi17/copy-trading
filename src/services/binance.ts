@@ -1,6 +1,9 @@
 import crypto from 'crypto';
-import axios, { AxiosInstance } from 'axios';
-import { BalanceInfo, UserPosition } from '../types';
+import https from 'https';
+import dns from 'dns';
+import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { BalanceInfo, UserPosition, ProxyConfig } from '../types';
 
 export interface SymbolFilterInfo {
   stepSize: number;
@@ -9,10 +12,38 @@ export interface SymbolFilterInfo {
   minNotional: number;
 }
 
+// Cache IP Cloudflare DoH untuk fapi.binance.com & testnet agar bypass blokir ISP lokal saat tanpa proxy
+const dohCache: Map<string, { ip: string; timestamp: number }> = new Map();
+
+async function resolveBinanceHostViaDoH(hostname: string): Promise<string | null> {
+  const cached = dohCache.get(hostname);
+  if (cached && Date.now() - cached.timestamp < 3600000) {
+    return cached.ip;
+  }
+  try {
+    const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
+      headers: { accept: 'application/dns-json' },
+      timeout: 5000,
+    });
+    const answers = res.data?.Answer || [];
+    for (const a of answers) {
+      if (a.type === 1 && a.data) {
+        dohCache.set(hostname, { ip: a.data, timestamp: Date.now() });
+        return a.data;
+      }
+    }
+  } catch {}
+  return hostname.includes('testnet') ? '18.64.37.31' : '108.138.141.5'; // CloudFront fallback IPs
+}
+
 export class BinanceFuturesClient {
   private apiKey: string = '';
   private secretKey: string = '';
   private baseUrl: string = 'https://fapi.binance.com';
+  private proxy?: ProxyConfig;
+  private proxyAgent: any = null;
+  private dohAgent: https.Agent | null = null;
+  private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
   private filterCache: Map<string, SymbolFilterInfo> = new Map();
   private lastExchangeInfoFetch: number = 0;
   private timeOffset: number = 0;
@@ -20,17 +51,102 @@ export class BinanceFuturesClient {
   private lastValidBalance: BalanceInfo | null = null;
   private lastValidPositions: UserPosition[] = [];
 
-  configure(apiKey: string, secretKey: string, isTestnet: boolean = false) {
+  configure(apiKey: string, secretKey: string, isTestnet: boolean = false, proxy?: ProxyConfig) {
     this.apiKey = (apiKey || '').trim();
     this.secretKey = (secretKey || '').trim();
     this.baseUrl = isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
+    this.proxy = proxy;
+    this.initProxyAgent();
     this.isDualSidePosition = null;
     this.lastDualSideFetch = 0;
     this.lastTimeSync = 0;
   }
 
+  private initProxyAgent() {
+    if (this.proxyAgent && typeof this.proxyAgent.destroy === 'function') {
+      try {
+        this.proxyAgent.destroy();
+      } catch {}
+    }
+    this.proxyAgent = null;
+
+    if (this.proxy?.enabled && this.proxy.host && this.proxy.port) {
+      let proxyHost = (this.proxy.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+      let proxyPort: number | null = this.proxy.port;
+      if (proxyHost.includes(':')) {
+        const parts = proxyHost.split(':');
+        proxyHost = parts[0];
+        if (!proxyPort && parts[1]) proxyPort = parseInt(parts[1], 10) || null;
+      }
+
+      if (proxyHost && proxyPort) {
+        const auth = this.proxy.username && this.proxy.password
+          ? `${encodeURIComponent(this.proxy.username)}:${encodeURIComponent(this.proxy.password)}@`
+          : '';
+        const proxyUrl = `http://${auth}${proxyHost}:${proxyPort}`;
+        this.proxyAgent = new HttpsProxyAgent(proxyUrl, {
+          keepAlive: true,
+          keepAliveMsecs: 30000,
+          timeout: 30000,
+          rejectUnauthorized: false,
+        });
+      }
+    }
+  }
+
   isConfigured(): boolean {
     return Boolean(this.apiKey && this.secretKey);
+  }
+
+  private getDohAgent(): https.Agent {
+    if (!this.dohAgent) {
+      this.dohAgent = new https.Agent({
+        keepAlive: true,
+        lookup: (hostname, options, callback) => {
+          const cb = typeof options === 'function' ? options : callback;
+          const opt = typeof options === 'object' ? options : {};
+          if (hostname.endsWith('binance.com') || hostname.endsWith('binancefuture.com')) {
+            resolveBinanceHostViaDoH(hostname).then((ip) => {
+              if (ip) {
+                if (opt && (opt as any).all) {
+                  cb(null, [{ address: ip, family: 4 }] as any);
+                } else {
+                  cb(null, ip, 4);
+                }
+              } else {
+                dns.lookup(hostname, options, cb);
+              }
+            }).catch(() => {
+              dns.lookup(hostname, options, cb);
+            });
+            return;
+          }
+          dns.lookup(hostname, options, cb);
+        },
+      });
+    }
+    return this.dohAgent;
+  }
+
+  /**
+   * Helper untuk membuat HTTP client publik (dengan baseURL dinamis & proxy/DoH)
+   */
+  private createPublicClient(timeoutMs: number = 8000): AxiosInstance {
+    const config: AxiosRequestConfig = {
+      baseURL: this.baseUrl,
+      timeout: timeoutMs,
+      headers: {
+        'Accept': 'application/json',
+      },
+    };
+    if (this.proxyAgent) {
+      config.httpAgent = this.proxyAgent;
+      config.httpsAgent = this.proxyAgent;
+      config.proxy = false;
+    } else {
+      config.httpsAgent = this.getDohAgent();
+    }
+    return axios.create(config);
   }
 
   /**
@@ -39,7 +155,7 @@ export class BinanceFuturesClient {
    */
   async syncTime(): Promise<number> {
     try {
-      const client = axios.create({ baseURL: this.baseUrl, timeout: 5000 });
+      const client = this.createPublicClient(5000);
       const res = await client.get('/fapi/v1/time');
       if (res.data?.serverTime) {
         this.timeOffset = Number(res.data.serverTime) - Date.now();
@@ -73,14 +189,22 @@ export class BinanceFuturesClient {
   }
 
   private createClient(): AxiosInstance {
-    return axios.create({
+    const config: any = {
       baseURL: this.baseUrl,
       timeout: 10000,
       headers: {
         'X-MBX-APIKEY': this.apiKey,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-    });
+    };
+    if (this.proxyAgent) {
+      config.httpAgent = this.proxyAgent;
+      config.httpsAgent = this.proxyAgent;
+      config.proxy = false;
+    } else {
+      config.httpsAgent = this.getDohAgent();
+    }
+    return axios.create(config);
   }
 
   /**
@@ -207,7 +331,7 @@ export class BinanceFuturesClient {
     }
 
     try {
-      const client = axios.create({ baseURL: this.baseUrl, timeout: 8000 });
+      const client = this.createPublicClient(8000);
       const res = await client.get('/fapi/v1/exchangeInfo');
       const symbols = res.data.symbols || [];
 
@@ -416,7 +540,14 @@ export class BinanceFuturesClient {
             if (liveQty > 0) {
               return await this.placeMarketOrder(symbol, side, liveQty, true, currentSide);
             }
-          } catch {}
+          } catch (liveQtyErr: any) {
+            lastErr = liveQtyErr;
+            if (attempt < maxRetries) {
+              await new Promise((res) => setTimeout(res, 500 * attempt));
+              continue;
+            }
+            throw liveQtyErr;
+          }
           return { status: 'ALREADY_CLOSED', msg };
         }
         if (attempt < maxRetries) {
@@ -428,14 +559,26 @@ export class BinanceFuturesClient {
   }
 
   /**
-   * Mengambil harga mark price realtime publik dari Binance Futures
+   * Mengambil harga mark price realtime publik dari Binance Futures (dengan in-memory caching 1.5s)
    */
   async getSymbolPrice(symbol: string): Promise<number> {
+    const sym = symbol.toUpperCase();
+    const cached = this.priceCache.get(sym);
+    if (cached && Date.now() - cached.timestamp < 1500) {
+      return cached.price;
+    }
+
     try {
-      const res = await axios.get(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol.toUpperCase()}`, { timeout: 6000 });
-      return parseFloat(res.data?.markPrice) || 0;
+      const client = this.createPublicClient(6000);
+      const res = await client.get(`/fapi/v1/premiumIndex?symbol=${sym}`);
+      const price = parseFloat(res.data?.markPrice) || 0;
+      if (price > 0) {
+        this.priceCache.set(sym, { price, timestamp: Date.now() });
+      }
+      return price;
     } catch {
-      return 0;
+      this.priceCache.set(sym, { price: cached ? cached.price : 0, timestamp: Date.now() });
+      return cached ? cached.price : 0;
     }
   }
 }

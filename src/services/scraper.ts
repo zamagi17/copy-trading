@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import https from 'https';
+import dns from 'dns';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { LeadPortfolioDetail, LeadPosition, LeadOrderRecord, ProxyConfig } from '../types';
 
@@ -125,7 +126,7 @@ export class CopyTradeScraper {
                 cb(null, resolvedIp, 4);
               }
             } else {
-              require('dns').lookup(hostname, options, cb);
+              dns.lookup(hostname, options, cb);
             }
           },
         });

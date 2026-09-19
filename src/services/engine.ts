@@ -453,7 +453,7 @@ export class CopyTradeEngine {
   }
 
   private initServices() {
-    binanceClient.configure(this.config.binanceApiKey, this.config.binanceSecretKey, this.config.isTestnet);
+    binanceClient.configure(this.config.binanceApiKey, this.config.binanceSecretKey, this.config.isTestnet, this.config.proxy);
     telegramService.configure(this.config.telegram);
   }
 
@@ -1262,6 +1262,20 @@ export class CopyTradeEngine {
     this.log('WARN', '🛑 Copy Trade Engine DINONAKTIFKAN.');
   }
 
+  /**
+   * Menghentikan loop polling sementara secara aman saat server shutdown/restart
+   * tanpa menonaktifkan status copyTradeActive agar auto-resume tetap bekerja
+   */
+  shutdown() {
+    this.isRunning = false;
+    if (this.pollTimeout) {
+      clearTimeout(this.pollTimeout);
+      this.pollTimeout = null;
+    }
+    this.saveVirtualState();
+    this.log('INFO', '🛑 Copy Trade Engine dihentikan sementara secara aman untuk server shutdown.');
+  }
+
   private async runLoop() {
     if (!this.isRunning) return;
 
@@ -2040,7 +2054,7 @@ export class CopyTradeEngine {
     this.lastLeaderDetail = leaderDetail;
 
     // AUTO-SNIPER PULLBACK: Periksa antrean order tertahan yang harganya telah pullback ke level entry leader
-    await this.checkAutoSniperPullback(currentLeaderMap, userBalance, userPositionsMap);
+    await this.checkAutoSniperPullback(currentLeaderMap, userBalance, userPositionsMap, userPositions);
 
     // Pasang avgCount dan sinkronkan live Mark Price & Floating PnL ke posisi leader sebelum broadcast
     for (const lp of currentLeaderPositions) {
@@ -3000,7 +3014,8 @@ export class CopyTradeEngine {
   private async checkAutoSniperPullback(
     currentLeaderMap: Map<string, LeadPosition>,
     userBalance: number,
-    userPositionsMap: Map<string, UserPosition>
+    userPositionsMap: Map<string, UserPosition>,
+    userPositionsList?: UserPosition[]
   ): Promise<void> {
     if (this.config.sniperPullbackEnabled === false || this.slippageSkippedOrders.size === 0) {
       return;
@@ -3052,18 +3067,21 @@ export class CopyTradeEngine {
         : item.positionSide;
       const targetPrice = item.targetPullbackPrice || item.leaderEntryPrice;
 
-      // 5. Cek apakah kondisi Pullback (Slippage 0 / Diskon) sudah terpenuhi
+      // 5. Cek apakah kondisi Pullback (Slippage 0 / Diskon / batas toleransi) sudah terpenuhi
       let isPullbackMatched = false;
       let discountPct = 0;
+      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
 
       if (targetUserSide === 'LONG') {
-        if (markPrice <= targetPrice * 1.0001) {
+        const thresholdPrice = targetPrice * (1 + (allowedAdversePct / 100));
+        if (markPrice <= thresholdPrice) {
           isPullbackMatched = true;
           discountPct = ((targetPrice - markPrice) / targetPrice) * 100;
         }
       } else {
         // SHORT
-        if (markPrice >= targetPrice * 0.9999) {
+        const thresholdPrice = targetPrice * (1 - (allowedAdversePct / 100));
+        if (markPrice >= thresholdPrice) {
           isPullbackMatched = true;
           discountPct = ((markPrice - targetPrice) / targetPrice) * 100;
         }
@@ -3093,7 +3111,21 @@ export class CopyTradeEngine {
                 : 0;
               const discountText = discountPct > 0
                 ? `🔥 Diskon +${discountPct.toFixed(2)}% Lebih Murah dari Leader!`
-                : `0.00% (Identik Harga Leader)`;
+                : (discountPct >= 0 ? `0.00% (Identik Harga Leader)` : `Toleransi Slippage: ${discountPct.toFixed(2)}%`);
+
+              if (res.position) {
+                userPositionsMap.set(`${res.position.symbol}_${res.position.positionSide}`, res.position);
+                if (userPositionsList) {
+                  const existingIdx = userPositionsList.findIndex(
+                    (u) => `${u.symbol}_${u.positionSide}` === `${res.position!.symbol}_${res.position!.positionSide}`
+                  );
+                  if (existingIdx >= 0) {
+                    userPositionsList[existingIdx] = res.position;
+                  } else {
+                    userPositionsList.push(res.position);
+                  }
+                }
+              }
 
               this.sendTelegram(
                 `🎯 <b>AUTO-SNIPER PULLBACK BERHASIL MASUK! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +

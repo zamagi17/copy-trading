@@ -19,8 +19,11 @@ services:
     ports:
       - "127.0.0.1:${PORT:-5000}:5000"
     volumes:
-      # Mount config.json dari server agar settingan existing di Oracle langsung termigrasi utuh
+      # Mount config dan data state agar tersimpan persisten di server host
       - ./config.json:/app/config.json
+      - ./virtual_state.json:/app/virtual_state.json
+      - ./trade_history.json:/app/trade_history.json
+      - ./daily_snapshots.json:/app/daily_snapshots.json
     networks:
       - db_zamagi_net
 

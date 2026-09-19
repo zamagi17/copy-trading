@@ -15,6 +15,7 @@ export class DatabaseService {
   private pool: Pool | null = null;
   public isConnected: boolean = false;
   private dbTargetInfo: string = '';
+  private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     try {
@@ -41,11 +42,35 @@ export class DatabaseService {
 
       this.pool.on('error', (err: any) => {
         console.error('[Database] Idle client error:', err.message);
+        this.isConnected = false;
+        this.startAutoReconnect();
       });
     } catch (e: any) {
       console.warn('[Database] Gagal inisialisasi connection pool:', e.message);
       this.pool = null;
     }
+  }
+
+  /**
+   * Menjalankan retry background reconnect setiap 30 detik jika DB sempat offline
+   */
+  private startAutoReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setInterval(async () => {
+      if (this.isConnected) {
+        if (this.reconnectTimer) {
+          clearInterval(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        return;
+      }
+      try {
+        const ok = await this.init();
+        if (ok) {
+          console.log('[Database] 🎉 Berhasil tersambung kembali ke PostgreSQL!');
+        }
+      } catch {}
+    }, 30000);
   }
 
   /**
@@ -131,6 +156,10 @@ export class DatabaseService {
         `);
 
         this.isConnected = true;
+        if (this.reconnectTimer) {
+          clearInterval(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
         console.log(`[Database] ✅ Terhubung ke PostgreSQL: ${this.dbTargetInfo}`);
 
         // Rekonsiliasi dua arah cerdas antara PostgreSQL dan File JSON lokal
@@ -142,6 +171,7 @@ export class DatabaseService {
     } catch (err: any) {
       this.isConnected = false;
       console.warn(`[Database] ⚠️ Tidak dapat terhubung ke PostgreSQL (${err.message}). Menggunakan penyimpanan lokal JSON sebagai fallback.`);
+      this.startAutoReconnect();
       return false;
     }
   }
@@ -814,6 +844,23 @@ export class DatabaseService {
       } catch (e: any) {
         console.error('[Database] Gagal simpan daily snapshot ke PostgreSQL:', e.message);
       }
+    }
+  }
+
+  /**
+   * Menutup koneksi database pool dan timer auto-reconnect secara aman
+   */
+  async close(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearInterval(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.pool) {
+      try {
+        await this.pool.end();
+      } catch {}
+      this.pool = null;
+      this.isConnected = false;
     }
   }
 }

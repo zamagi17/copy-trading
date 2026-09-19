@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { engine } from './services/engine';
 import { scraper } from './services/scraper';
 import { binanceClient } from './services/binance';
+import { dbService } from './services/db';
 import { AuthService } from './services/auth';
 import { telegramService } from './services/telegram';
 import { UserPosition, BalanceInfo } from './types';
@@ -121,7 +122,11 @@ function broadcast(type: string, payload: any) {
   const message = JSON.stringify({ type, payload });
   for (const ws of clients) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(message);
+      try {
+        ws.send(message);
+      } catch {
+        clients.delete(ws);
+      }
     }
   }
 }
@@ -531,8 +536,29 @@ app.post('/api/clear-closed-trades', requireAuth, (req, res) => {
   res.json({ success: true, message: 'Riwayat trade selesai telah dibersihkan.' });
 });
 
-// Fallback index.html
+// Health Check Monitoring Endpoint (Public untuk uptime monitor / Docker healthcheck)
+app.get('/api/health', (req, res) => {
+  const status = engine.getStatus();
+  const cfg = engine.getConfig();
+  res.json({
+    status: 'UP',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    engineActive: status.isActive,
+    paperTrading: cfg.paperTrading,
+    portfolioId: status.portfolioId,
+    pollCount: status.pollCount,
+    activePairs: status.activePairs,
+    memoryUsageMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+  });
+});
+
+// Fallback index.html (Khusus non-API SPA navigation)
 app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    res.status(404).json({ success: false, message: 'Endpoint API tidak ditemukan' });
+    return;
+  }
   res.sendFile(path.resolve(__dirname, '../public/index.html'));
 });
 
@@ -561,3 +587,44 @@ server.listen(PORT, async () => {
     console.log(`[Auto-Start] ⏸️ Parameter copyTradeActive bernilai OFF (Standby). Menunggu tombol Start dari Dashboard.`);
   }
 });
+
+// Penanganan Graceful Shutdown (SIGINT / SIGTERM) untuk lingkungan Docker & Server VPS
+let isShuttingDown = false;
+async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`\n[Server] 🛑 Menerima sinyal ${signal}. Memulai proses shutdown yang aman...`);
+
+  try {
+    engine.shutdown();
+    await dbService.close();
+  } catch (err: any) {
+    console.error('[Server] Kesalahan saat graceful shutdown:', err.message);
+  }
+
+  clearInterval(pingInterval);
+
+  // Tutup koneksi aktif semua websocket client
+  for (const client of clients) {
+    try {
+      client.close(1001, 'Server shutting down');
+    } catch {}
+  }
+  clients.clear();
+  try {
+    wss.close();
+  } catch {}
+
+  server.close(() => {
+    console.log('[Server] ✅ Server HTTP & WebSocket ditutup dengan aman. Sampai jumpa!');
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.warn('[Server] ⚠️ Shutdown timeout dipicu (5 detik). Memaksa proses keluar...');
+    process.exit(0);
+  }, 5000).unref();
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
