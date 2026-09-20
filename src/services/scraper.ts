@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import https from 'https';
 import dns from 'dns';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { LeadPortfolioDetail, LeadPosition, LeadOrderRecord, ProxyConfig } from '../types';
+import { LeadPortfolioDetail, LeadPosition, LeadOrderRecord, ProxyConfig, HybridPollingConfig } from '../types';
 
 const BASE_URL = 'https://www.binance.com';
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
@@ -34,6 +34,9 @@ async function resolveBinanceIpViaDoH(): Promise<string | null> {
 
 export class CopyTradeScraper {
   private detailCache: Map<string, { data: any; perf?: any; lastFetch: number }> = new Map();
+  private positionsCache: Map<string, { positions: LeadPosition[]; lastFetch: number }> = new Map();
+  private lastKnownOrderTime: Map<string, number> = new Map();
+  private lastKnownOrderKey: Map<string, string> = new Map();
   private cachedClient: AxiosInstance | null = null;
   private cachedClientKey: string = '';
   private cachedAgent: any = null;
@@ -48,6 +51,9 @@ export class CopyTradeScraper {
     this.cachedAgent = null;
     this.cachedClient = null;
     this.cachedClientKey = '';
+    this.positionsCache.clear();
+    this.lastKnownOrderTime.clear();
+    this.lastKnownOrderKey.clear();
   }
 
   private async createClient(proxy?: ProxyConfig): Promise<AxiosInstance> {
@@ -87,7 +93,7 @@ export class CopyTradeScraper {
         'User-Agent': CHROME_UA,
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Encoding': 'gzip, deflate, br',
         'clienttype': 'web',
         'Connection': 'keep-alive',
       },
@@ -312,7 +318,11 @@ export class CopyTradeScraper {
    * Mengambil detail portofolio leader (nickname, total margin, ROI, dsb)
    * Dilengkapi auto-retry 1x instan pada transient glitch agar tidak memicu log error palsu.
    */
-  async fetchPortfolioDetail(portfolioId: string, proxy?: ProxyConfig): Promise<LeadPortfolioDetail> {
+  async fetchPortfolioDetail(
+    portfolioId: string,
+    proxy?: ProxyConfig,
+    hybridPolling?: HybridPollingConfig
+  ): Promise<LeadPortfolioDetail> {
     const timestamp = Date.now();
     const id = (portfolioId || '').trim();
     if (!id) {
@@ -338,7 +348,7 @@ export class CopyTradeScraper {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await this._doFetchPortfolioDetail(id, proxy, timestamp);
+        return await this._doFetchPortfolioDetail(id, proxy, timestamp, hybridPolling);
       } catch (err: any) {
         lastError = err;
         this.resetClient();
@@ -358,7 +368,12 @@ export class CopyTradeScraper {
     return this._handleFetchError(id, lastError, timestamp);
   }
 
-  private async _doFetchPortfolioDetail(id: string, proxy?: ProxyConfig, timestamp: number = Date.now()): Promise<LeadPortfolioDetail> {
+  private async _doFetchPortfolioDetail(
+    id: string,
+    proxy?: ProxyConfig,
+    timestamp: number = Date.now(),
+    hybridPolling?: HybridPollingConfig
+  ): Promise<LeadPortfolioDetail> {
     const cached = this.detailCache.get(id);
     let data = cached?.data;
     let perf = cached?.perf;
@@ -402,16 +417,108 @@ export class CopyTradeScraper {
     const maxFollowerCount = Number(data?.maxCopyCount ?? data?.maxFollowerCount ?? 1000);
     const positionShow = data?.positionShow !== false; // false jika di-private oleh leader
 
-    // Ambil posisi aktif jika public, atau ambil Latest Records HANYA jika mode privat
-    // Tidak mengambil keduanya sekaligus agar kuota proxy hemat hingga 50%!
     let positions: LeadPosition[] = [];
     let orders: LeadOrderRecord[] = [];
 
     if (positionShow) {
-      // Mode Publik: Hanya ambil posisi aktif yang sedang terbuka
-      positions = await this.fetchPositions(id, proxy);
+      // =========================================================================
+      // MODE PUBLIK POSITIONS:
+      // Tab Positions dibuka oleh Leader. Jika Trading API aktif, endpoint /positions
+      // mengembalikan 810 baris koin (~190 KB per poll).
+      // Dengan Hybrid Smart Trigger Polling:
+      // 1. Cek feed order cepat (~1 KB dengan Brotli) setiap polling tick.
+      // 2. Jika terdeteksi transaksi baru (orderTime baru / orderKey berbeda),
+      //    unduh posisi penuh seketika (Zero Latency copy trade).
+      // 3. Heartbeat snapshot penuh berkala (default tiap 60 detik) untuk sinkronisasi.
+      // 4. Jika idle / holding posisi tanpa transaksi baru, kembalikan cache posisi
+      //    (hemat kuota residential proxy hingga 99.2%!).
+      // =========================================================================
+      const isHybridEnabled = hybridPolling ? hybridPolling.enabled !== false : true;
+      const cachedPos = this.positionsCache.get(id);
+      const snapshotIntervalMs = Math.max(15, (hybridPolling?.snapshotIntervalSec || 60)) * 1000;
+
+      if (!isHybridEnabled || !cachedPos) {
+        // Cold start (pertama kali jalan) atau Hybrid non-aktif: Unduh snapshot posisi penuh
+        positions = await this.fetchPositions(id, proxy);
+        this.positionsCache.set(id, { positions, lastFetch: timestamp });
+
+        // Simpan baseline order terkini
+        try {
+          const recentOrders = await this.fetchOrderHistory(id, proxy, 5);
+          if (recentOrders.length > 0) {
+            const sortedOrders = [...recentOrders].sort((a, b) => b.orderTime - a.orderTime);
+            this.lastKnownOrderTime.set(id, sortedOrders[0].orderTime);
+            if (sortedOrders[0].orderKey) {
+              this.lastKnownOrderKey.set(id, sortedOrders[0].orderKey);
+            }
+          }
+        } catch {}
+      } else {
+        const isSnapshotDue = (timestamp - cachedPos.lastFetch) >= snapshotIntervalMs;
+
+        if (isSnapshotDue) {
+          // Heartbeat periodik: Sinkronisasi posisi penuh
+          positions = await this.fetchPositions(id, proxy);
+          this.positionsCache.set(id, { positions, lastFetch: timestamp });
+
+          try {
+            const recentOrders = await this.fetchOrderHistory(id, proxy, 5);
+            if (recentOrders.length > 0) {
+              const sortedOrders = [...recentOrders].sort((a, b) => b.orderTime - a.orderTime);
+              this.lastKnownOrderTime.set(id, sortedOrders[0].orderTime);
+              if (sortedOrders[0].orderKey) {
+                this.lastKnownOrderKey.set(id, sortedOrders[0].orderKey);
+              }
+            }
+          } catch {}
+        } else {
+          // Fast Check: Periksa apakah ada order baru dari leader via Latest Records (hanya ~1 KB)
+          let recentOrders: LeadOrderRecord[] = [];
+          try {
+            recentOrders = await this.fetchOrderHistory(id, proxy, 5);
+          } catch {
+            // Glitch sementara pada feed order stream: fallback aman ke cache posisi untuk tick ini
+            positions = cachedPos.positions.map((p) => ({ ...p }));
+          }
+
+          if (recentOrders.length > 0) {
+            const sortedOrders = [...recentOrders].sort((a, b) => b.orderTime - a.orderTime);
+            const currentMaxOrderTime = sortedOrders[0].orderTime;
+            const currentLatestKey = sortedOrders[0].orderKey || '';
+
+            const prevMaxOrderTime = this.lastKnownOrderTime.get(id) || 0;
+            const prevOrderKey = this.lastKnownOrderKey.get(id) || '';
+
+            const hasNewOrder = (currentMaxOrderTime > prevMaxOrderTime) ||
+              (Boolean(currentLatestKey) && currentLatestKey !== prevOrderKey);
+
+            if (hasNewOrder) {
+              // TRANSAKSI BARU OLEH LEADER TERDETEKSI!
+              // Langsung unduh snapshot posisi penuh tanpa jeda agar copy trade instan
+              positions = await this.fetchPositions(id, proxy);
+              this.positionsCache.set(id, { positions, lastFetch: timestamp });
+
+              // Update baseline HANYA setelah fetchPositions sukses
+              this.lastKnownOrderTime.set(id, currentMaxOrderTime);
+              if (currentLatestKey) {
+                this.lastKnownOrderKey.set(id, currentLatestKey);
+              }
+            } else {
+              // Tidak ada transaksi baru: Gunakan salinan aman cache posisi (0 byte pemborosan kuota)
+              positions = cachedPos.positions.map((p) => ({ ...p }));
+            }
+          } else if (!positions || positions.length === 0) {
+            positions = cachedPos.positions.map((p) => ({ ...p }));
+          }
+        }
+      }
     } else {
-      // Mode Privat: Ambil 10 order teratas agar dapat merekonstruksi posisi aktif secara akurat
+      // =========================================================================
+      // MODE PRIVAT POSITIONS:
+      // Tab positions di-private oleh leader.
+      // Logika dipertahankan 100% SAMA (mengambil 10 order teratas dari Latest Records).
+      // Menggunakan kompresi Brotli untuk menghemat bandwidth hingga < 1 KB.
+      // =========================================================================
       orders = await this.fetchOrderHistory(id, proxy, 10);
     }
 

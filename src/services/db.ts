@@ -234,6 +234,12 @@ export class DatabaseService {
     if (fileCfg.adaptivePolling || dbCfg.adaptivePolling) {
       merged.adaptivePolling = { ...(fileCfg.adaptivePolling || {}), ...(dbCfg.adaptivePolling || {}) };
     }
+    if (fileCfg.idleStandby || dbCfg.idleStandby) {
+      merged.idleStandby = { ...(fileCfg.idleStandby || {}), ...(dbCfg.idleStandby || {}) };
+    }
+    if (fileCfg.hybridPolling || dbCfg.hybridPolling) {
+      merged.hybridPolling = { ...(fileCfg.hybridPolling || {}), ...(dbCfg.hybridPolling || {}) };
+    }
 
     // Parameter baru
     if (dbCfg.reorderWindowMinutes === undefined && fileCfg.reorderWindowMinutes !== undefined) {

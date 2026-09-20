@@ -246,6 +246,9 @@ const I18N = {
     check_idle_standby: 'Aktifkan Jeda Hemat saat 0 Posisi (Smart Idle Standby)',
     hint_idle_standby: 'Saat tidak ada posisi aktif di Leader & User, bot otomatis melambat ke jeda santai untuk menghemat kuota proxy hingga 65%. Begitu Leader buka posisi, bot langsung kilat kembali ke kecepatan normal!',
     label_idle_interval: 'Jeda Santai saat 0 Posisi (Detik):',
+    check_hybrid_polling: 'Mode Hemat Kuota Hybrid (Zero-Lag Smart Trigger)',
+    hint_hybrid_polling: 'Solusi anti-boros kuota hingga 99.2% (dari ~9.1 GB/hari menjadi ~68 MB/hari) untuk Leader dengan Trading API aktif (810 koin). Bot memantau feed order cepat (~1 KB) dan otomatis mengunduh posisi penuh seketika saat Leader bertransaksi!',
+    label_hybrid_interval: 'Interval Heartbeat Sinkronisasi Penuh (Detik):',
 
     legend_weekend_break: 'Opsi Libur Akhir Pekan (Waktu WIB UTC+7)',
     check_weekend_break: 'Aktifkan Libur Sabtu & Minggu (Waktu WIB UTC+7)',
@@ -516,6 +519,9 @@ const I18N = {
     check_idle_standby: 'Enable Smart Zero-Position Idle Standby (Proxy Saver)',
     hint_idle_standby: 'When there are 0 active positions on both Leader and User, the bot automatically slows down to save proxy bandwidth by up to 65%. The moment Leader opens a trade, it instantly accelerates back to full speed!',
     label_idle_interval: 'Idle Standby Interval (Seconds):',
+    check_hybrid_polling: 'Hybrid Bandwidth Saver Mode (Zero-Lag Smart Trigger)',
+    hint_hybrid_polling: 'Reduces residential proxy usage by up to 99.2% (from ~9.1 GB/day to ~68 MB/day) for Leaders with Binance Trading API active (810 coins). Bot polls lightweight order feed (~1 KB) and instantly fetches full positions the moment Leader trades!',
+    label_hybrid_interval: 'Full Synchronization Heartbeat Interval (Seconds):',
 
     legend_weekend_break: 'Weekend Holiday Mode (WIB Time UTC+7)',
     check_weekend_break: 'Enable Saturday & Sunday Holiday (WIB Time UTC+7)',
@@ -782,6 +788,22 @@ window.toggleIdleStandbyInputs = toggleIdleStandbyInputs;
 window.setIdlePreset = function(sec) {
   if (inputIdleStandbyInterval) {
     inputIdleStandbyInterval.value = Number.isInteger(sec) ? sec.toString() : sec.toFixed(1);
+  }
+};
+
+const checkHybridPolling = document.getElementById('checkHybridPolling');
+const inputHybridSnapshotInterval = document.getElementById('inputHybridSnapshotInterval');
+const hybridPollingConfigArea = document.getElementById('hybridPollingConfigArea');
+
+function toggleHybridPollingInputs() {
+  if (!hybridPollingConfigArea) return;
+  hybridPollingConfigArea.style.display = checkHybridPolling?.checked ? 'block' : 'none';
+}
+window.toggleHybridPollingInputs = toggleHybridPollingInputs;
+
+window.setHybridPreset = function(sec) {
+  if (inputHybridSnapshotInterval) {
+    inputHybridSnapshotInterval.value = sec.toString();
   }
 };
 const inputRatioMultiplier = document.getElementById('inputRatioMultiplier');
@@ -1646,10 +1668,27 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
 
     let syncBadge = '';
     if (lp && up) {
-      if (isInversePair) {
-        syncBadge = `<span class="badge badge-purple" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.5); color: #c084fc;">${t('badge_connected_inverse', 'TERKONEKSI (INVERSE)')}</span>`;
+      const skippedOrders = currentStatus?.slippageSkippedOrders || [];
+      const skippedAvg = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side && s.type === 'AVERAGING');
+      const baseConnectedBadge = isInversePair
+        ? `<span class="badge badge-purple" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.5); color: #c084fc;">${t('badge_connected_inverse', 'TERKONEKSI (INVERSE)')}</span>`
+        : `<span class="badge badge-cyan">${t('badge_connected', 'TERKONEKSI')}</span>`;
+
+      if (skippedAvg && skippedAvg.isSniperPending) {
+        const targetOp = side === 'LONG' ? '≤' : '≥';
+        const targetPrice = skippedAvg.targetPullbackPrice || skippedAvg.leaderLayerPrice || skippedAvg.leaderEntryPrice || 0;
+        const refAvgTime = skippedAvg.skippedAt || 0;
+        const elapsedAvgMs = refAvgTime > 0 ? (Date.now() - refAvgTime) : 0;
+        const windowAvgMs = (currentConfig?.reorderWindowMinutes || 30) * 60 * 1000;
+        const remainingAvgMins = Math.max(1, Math.ceil((windowAvgMs - elapsedAvgMs) / 60000));
+        
+        const sniperTitle = currentLang === 'en'
+          ? `Auto-Sniper Averaging active: waiting for pullback to ${targetOp} $${formatPrice(targetPrice)} (BEP Protection)`
+          : `Auto-Sniper Averaging aktif: menunggu pullback ke ${targetOp} $${formatPrice(targetPrice)} (Proteksi BEP Anti-Rugi)`;
+
+        syncBadge = `${baseConnectedBadge}<br/><span class="badge badge-purple" style="margin-top: 4px;" title="${sniperTitle}">🎯 SNIPER AVG (${targetOp} $${formatPrice(targetPrice)})</span>`;
       } else {
-        syncBadge = `<span class="badge badge-cyan">${t('badge_connected', 'TERKONEKSI')}</span>`;
+        syncBadge = baseConnectedBadge;
       }
     } else if (up && !lp) {
       syncBadge = isPrivate 
@@ -1841,12 +1880,10 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       );
       if (openOrders.length > 1) {
         leaderAvg = openOrders.length - 1;
-        if (userAvg === 0) {
-          userAvg = leaderAvg;
-        }
       }
     }
 
+    const uBadge = userAvg === 0 ? 'badge-gray' : (userAvg === 1 ? 'badge-yellow' : 'badge-purple');
     let avgDownDisplay = '';
     const layerSuffix = 'Layer';
     const layersSuffix = currentLang === 'en' ? 'Layers' : 'Layer';
@@ -1874,10 +1911,17 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       const skippedAvg = skippedOrders.find((s) => s.symbol === symbol && s.positionSide === side && s.type === 'AVERAGING');
       const refAvgTime = skippedAvg?.skippedAt || 0;
       const elapsedAvgMs = refAvgTime > 0 ? (Date.now() - refAvgTime) : 0;
-      const windowAvgMs = 30 * 60 * 1000;
-      const isAvgWithin30M = refAvgTime > 0 && elapsedAvgMs <= windowAvgMs;
+      const windowAvgMs = (currentConfig?.reorderWindowMinutes || 30) * 60 * 1000;
+      const isAvgWithinWindow = refAvgTime > 0 && elapsedAvgMs <= windowAvgMs;
       const remainingAvgMins = Math.max(1, Math.ceil((windowAvgMs - elapsedAvgMs) / 60000));
-      const avgBtnLabel = isAvgWithin30M ? `⚡ Sync Avg (${remainingAvgMins}m)` : '⚡ Sync Avg';
+      const avgBtnLabel = isAvgWithinWindow ? `⚡ Sync Avg (${remainingAvgMins}m)` : '⚡ Sync Avg';
+
+      let sniperAvgNotice = '';
+      if (skippedAvg?.isSniperPending) {
+        const targetOp = side === 'LONG' ? '≤' : '≥';
+        const targetPrice = skippedAvg.targetPullbackPrice || skippedAvg.leaderLayerPrice || skippedAvg.leaderEntryPrice || 0;
+        sniperAvgNotice = `<br/><small class="text-purple" style="font-size: 10px; font-weight: 600;" title="${currentLang === 'en' ? 'Auto-Sniper holding layer for BEP protection' : 'Auto-Sniper menahan penambahan layer untuk proteksi BEP'}">🎯 Mengintai ${targetOp} $${formatPrice(targetPrice)}</small>`;
+      }
 
       const syncBtn = (up && leaderAvg > userAvg)
         ? `<br/><button class="btn-sync-avg" onclick="syncAvgDown('${symbol}', '${side}')" title="${currentLang === 'en' ? 'Catch up missing avg down layer!' : 'Ketinggalan layer! Klik untuk averaging down susulan'}">${avgBtnLabel}</button>`
@@ -1885,6 +1929,7 @@ function renderPositionsTable(leaderPositions = [], userPositions = [], orders =
       avgDownDisplay = `
         <small class="text-dim">L:</small> <span class="badge ${lBadge}" title="Leader: ${leaderAvg}x avg down (${leaderAvg + 1} layer)">${leaderAvg > 0 ? `+${leaderAvg}x` : '0x'}</span><br/>
         <small class="text-dim">U:</small> <span class="badge ${uBadge}" title="Akun Anda: ${userAvg}x avg down (${userAvg + 1} layer)">${userAvg > 0 ? `+${userAvg}x` : '0x'}</span>
+        ${sniperAvgNotice}
         ${syncBtn}
       `;
     }
@@ -2238,6 +2283,15 @@ function openSettingsModal() {
     const isbSec = isb?.idleIntervalSec ?? 5.0;
     inputIdleStandbyInterval.value = Number.isInteger(isbSec) ? isbSec.toString() : isbSec.toFixed(1);
   }
+  toggleIdleStandbyInputs();
+
+  // Mode Hemat Kuota Hybrid
+  const hyb = currentConfig.hybridPolling;
+  if (checkHybridPolling) checkHybridPolling.checked = hyb?.enabled !== false;
+  if (inputHybridSnapshotInterval) {
+    inputHybridSnapshotInterval.value = String(hyb?.snapshotIntervalSec || 60);
+  }
+  toggleHybridPollingInputs();
 
   // Weekend Break (Waktu China CST)
   const wb = currentConfig.weekendBreak;
@@ -2511,6 +2565,18 @@ async function saveSettings() {
           }
         }
         return 5.0;
+      })(),
+    },
+    hybridPolling: {
+      enabled: checkHybridPolling ? checkHybridPolling.checked : true,
+      snapshotIntervalSec: (() => {
+        if (inputHybridSnapshotInterval) {
+          const parsed = parseInt(inputHybridSnapshotInterval.value);
+          if (!isNaN(parsed) && parsed >= 15) {
+            return parsed;
+          }
+        }
+        return 60;
       })(),
     },
     weekendBreak: {

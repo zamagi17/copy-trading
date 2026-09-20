@@ -50,6 +50,11 @@ export interface IdleStandbyConfig {
   idleIntervalSec: number;   // Jeda polling saat tidak ada posisi (detik, default 5.0)
 }
 
+export interface HybridPollingConfig {
+  enabled: boolean;            // true jika mode hemat kuota hybrid aktif (default: true)
+  snapshotIntervalSec: number; // Interval heartbeat snapshot posisi penuh saat holding (detik, default 60)
+}
+
 export interface PollingStatusInfo {
   isAdaptive: boolean;
   currentIntervalMs: number;
@@ -59,6 +64,7 @@ export interface PollingStatusInfo {
   cstTimeStr?: string;
   isWeekendHoliday?: boolean;
   isIdleStandby?: boolean;
+  isHybrid?: boolean;
 }
 
 export interface DailyScheduleConfig {
@@ -105,6 +111,7 @@ export interface AppConfig {
   pollingIntervalMs: number;
   adaptivePolling?: AdaptivePollingConfig;
   idleStandby?: IdleStandbyConfig;
+  hybridPolling?: HybridPollingConfig;
   weekendBreak?: WeekendBreakConfig;
   dailySchedule?: DailyScheduleConfig;
   proxy: ProxyConfig;
@@ -218,6 +225,11 @@ export interface SkippedOrderInfo {
   notifiedSniper?: boolean;
   skippedAt: number;
   reason?: string;
+  leaderLayerPrice?: number;
+  userProjectedEntry?: number;
+  bepDifferencePct?: number;
+  deltaAmount?: number;
+  prevLeaderAmount?: number;
 }
 
 export interface ClosedTrade {

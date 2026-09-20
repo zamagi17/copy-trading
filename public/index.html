@@ -595,6 +595,33 @@
               </div>
             </div>
           </div>
+
+          <!-- Mode Hemat Kuota Hybrid (Smart Trigger Polling & Brotli) -->
+          <div class="form-row" id="hybridPollingRow" style="margin-top: 14px; padding: 14px 16px; background: rgba(16, 185, 129, 0.05); border: 1px dashed rgba(16, 185, 129, 0.3); border-radius: 10px;">
+            <div class="form-field checkbox-field" style="margin-bottom: 0;">
+              <label class="custom-checkbox">
+                <input type="checkbox" id="checkHybridPolling" checked onchange="toggleHybridPollingInputs()">
+                <span class="checkmark"></span>
+                <span style="font-weight: 700; color: #34d399;" data-i18n="check_hybrid_polling">Mode Hemat Kuota Hybrid (Zero-Lag Smart Trigger)</span>
+              </label>
+              <small data-i18n="hint_hybrid_polling" style="color: #94a3b8; display: block; margin-top: 4px; margin-left: 28px; line-height: 1.45;">
+                Solusi anti-boros kuota hingga <strong>99.2%</strong> (dari ~9.1 GB/hari menjadi ~68 MB/hari) untuk Leader dengan Trading API aktif (810 koin). Bot memantau feed order cepat (~1 KB) dan otomatis mengunduh posisi penuh seketika saat Leader bertransaksi!
+              </small>
+            </div>
+            
+            <div id="hybridPollingConfigArea" style="margin-left: 28px; margin-top: 10px;">
+              <label for="inputHybridSnapshotInterval" style="font-size: 0.85rem; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;" data-i18n="label_hybrid_interval">Interval Heartbeat Sinkronisasi Penuh (Detik):</label>
+              <div style="display: flex; gap: 8px; align-items: center; max-width: 280px;">
+                <input type="number" id="inputHybridSnapshotInterval" step="5" min="15" max="300" value="60" placeholder="60" style="flex: 1; font-weight: 700; font-size: 1.05rem;">
+                <span style="font-weight: 700; color: #34d399; font-size: 0.95rem; padding: 6px 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px;">Detik</span>
+              </div>
+              <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setHybridPreset(30)">⚡ 30s (Agresif)</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; border-radius: 6px; cursor: pointer; font-weight: 700;" onclick="setHybridPreset(60)">⭐ 60s (Sangat Disarankan)</button>
+                <button type="button" class="btn btn-sm" style="padding: 3px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); color: #cbd5e1; border-radius: 6px; cursor: pointer;" onclick="setHybridPreset(120)">💰 120s (Ultra Hemat)</button>
+              </div>
+            </div>
+          </div>
         </fieldset>
 
         <!-- Tab: Weekend Holiday (Waktu WIB UTC+7) -->

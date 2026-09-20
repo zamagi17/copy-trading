@@ -135,7 +135,7 @@ export class CopyTradeEngine {
 
     // Warmup awal: ambil profil leader dan saldo Binance secara aman di latar belakang jika belum ada
     if (!this.lastLeaderDetail && this.config.portfolioId) {
-      scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy).then((detail) => {
+      scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy, this.config.hybridPolling).then((detail) => {
         if (detail.isSuccess) {
           this.lastLeaderDetail = detail;
           this.lastLeaderEquity = detail.totalEquity || this.lastLeaderEquity;
@@ -386,6 +386,17 @@ export class CopyTradeEngine {
         parsed.idleStandby.idleIntervalSec = 5.0;
       }
     }
+    if (!parsed.hybridPolling) {
+      parsed.hybridPolling = {
+        enabled: true,
+        snapshotIntervalSec: 60,
+      };
+    } else {
+      if (parsed.hybridPolling.enabled === undefined) parsed.hybridPolling.enabled = true;
+      if (!parsed.hybridPolling.snapshotIntervalSec || isNaN(Number(parsed.hybridPolling.snapshotIntervalSec))) {
+        parsed.hybridPolling.snapshotIntervalSec = 60;
+      }
+    }
     if (!parsed.proxy) parsed.proxy = { enabled: false, host: '', port: 823, username: '', password: '' };
     return parsed as AppConfig;
   }
@@ -436,6 +447,7 @@ export class CopyTradeEngine {
       this.lastProcessedOrderTime = 0;
       this.processedOrderKeys.clear();
       this.isFirstTick = true;
+      scraper.resetClient();
       this.log('INFO', `🔄 Target Leader diperbarui ke ID: ${this.config.portfolioId}. Tracking posisi di-reset.`);
     }
 
@@ -590,7 +602,7 @@ export class CopyTradeEngine {
   async fetchLeaderSnapshot(): Promise<LeadPortfolioDetail | null> {
     if (!this.config.portfolioId) return null;
     try {
-      const detail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy);
+      const detail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy, this.config.hybridPolling);
       if (detail.isSuccess) {
         if (detail.positionShow === false) {
           detail.positions = Array.from(this.streamLeaderPositions.values());
@@ -599,12 +611,10 @@ export class CopyTradeEngine {
           for (const lp of detail.positions) {
             const counts = this.positionAvgCounts.get(`${lp.symbol}_${lp.positionSide}`);
             lp.avgCount = counts?.leader || 0;
-            if (!lp.markPrice || lp.markPrice <= 0) {
-              try {
-                const mp = await binanceClient.getSymbolPrice(lp.symbol);
-                if (mp > 0) lp.markPrice = mp;
-              } catch {}
-            }
+            try {
+              const mp = await binanceClient.getSymbolPrice(lp.symbol);
+              if (mp > 0) lp.markPrice = mp;
+            } catch {}
             if (lp.markPrice > 0 && lp.entryPrice > 0 && lp.amount > 0) {
               lp.unrealizedProfit = lp.positionSide === 'LONG'
                 ? (lp.markPrice - lp.entryPrice) * lp.amount
@@ -1103,6 +1113,8 @@ export class CopyTradeEngine {
       ? leaderPositionsCount
       : this.lastLeaderPositions.size;
 
+    const isHybrid = this.config.hybridPolling?.enabled !== false;
+
     // 0. Prioritas Utama: Jika terdapat antrean Auto-Sniper yang sedang mengintai pullback harga,
     // jangan gunakan standby lambat (60s). Selalu polling cepat (1-1.5s) agar momentum pullback diskon tidak hilang!
     if (this.slippageSkippedOrders.size > 0) {
@@ -1115,6 +1127,7 @@ export class CopyTradeEngine {
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: weekendStatus.isHolidayActive,
         isIdleStandby: false,
+        isHybrid,
       };
     }
 
@@ -1129,6 +1142,7 @@ export class CopyTradeEngine {
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: false,
         isIdleStandby: false,
+        isHybrid,
       };
     }
 
@@ -1144,6 +1158,7 @@ export class CopyTradeEngine {
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: true,
         isIdleStandby: false,
+        isHybrid,
       };
     }
 
@@ -1162,6 +1177,7 @@ export class CopyTradeEngine {
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: false,
         isIdleStandby: true,
+        isHybrid,
       };
     }
 
@@ -1176,6 +1192,7 @@ export class CopyTradeEngine {
         cstTimeStr: times.cstTimeStr,
         isWeekendHoliday: false,
         isIdleStandby: false,
+        isHybrid,
       };
     }
 
@@ -1227,6 +1244,7 @@ export class CopyTradeEngine {
       wibTimeStr: times.wibTimeStr,
       cstTimeStr: times.cstTimeStr,
       isWeekendHoliday: false,
+      isHybrid,
     };
   }
 
@@ -1391,7 +1409,7 @@ export class CopyTradeEngine {
     this.pollCount++;
 
     // 1. Fetch data posisi leader
-    const leaderDetail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy);
+    const leaderDetail = await scraper.fetchPortfolioDetail(this.config.portfolioId, this.config.proxy, this.config.hybridPolling);
     if (!leaderDetail.isSuccess) {
       const isIpBlocked = leaderDetail.errorMessage?.includes('403');
       const isQuotaOut = leaderDetail.errorMessage?.includes('407');
@@ -1439,12 +1457,10 @@ export class CopyTradeEngine {
     this.lastLeaderEquity = leaderDetail.totalEquity || this.lastLeaderEquity;
     let currentLeaderPositions = leaderDetail.positions || [];
     for (const p of currentLeaderPositions) {
-      if (!p.markPrice || p.markPrice <= 0) {
-        try {
-          const mp = await binanceClient.getSymbolPrice(p.symbol);
-          if (mp > 0) p.markPrice = mp;
-        } catch {}
-      }
+      try {
+        const mp = await binanceClient.getSymbolPrice(p.symbol);
+        if (mp > 0) p.markPrice = mp;
+      } catch {}
     }
 
     // Map untuk posisi leader saat ini
@@ -1466,11 +1482,12 @@ export class CopyTradeEngine {
       // Sinkronkan mark price & hitung floating PnL untuk posisi simulasi
       for (const [k, vp] of this.virtualPositions.entries()) {
         const lp = currentLeaderMap.get(k);
-        let markPrice = lp && lp.markPrice > 0 ? lp.markPrice : 0;
-        if (!markPrice) {
-          try {
-            markPrice = await binanceClient.getSymbolPrice(vp.symbol);
-          } catch {}
+        let markPrice = 0;
+        try {
+          markPrice = await binanceClient.getSymbolPrice(vp.symbol);
+        } catch {}
+        if (!markPrice && lp && lp.markPrice > 0) {
+          markPrice = lp.markPrice;
         }
         if (markPrice > 0) {
           vp.markPrice = markPrice;
@@ -1672,7 +1689,7 @@ export class CopyTradeEngine {
                 // Posisi akun user sudah aktif -> Eksekusi Averaging Down (Scale In)!
                 const prevQty = prevTotalLeaderQty > 0 ? prevTotalLeaderQty : ord.executedQty;
                 this.log('INFO', `📈 [Latest Records] Leader menambah muatan (Averaging Down): ${ord.symbol} ${ord.positionSide} (+${ord.executedQty} @ $${ord.avgPrice})`);
-                const avgRes = await this.handleAveraging(mockPos, ord.executedQty, prevQty, userBalance, userPos);
+                const avgRes = await this.handleAveraging(mockPos, ord.executedQty, prevQty, userBalance, userPos, ord.avgPrice);
                 if (avgRes && userPos) {
                   const actualKey = `${userPos.symbol}_${userPos.positionSide}`;
                   userPositionsMap.set(actualKey, userPos);
@@ -1977,17 +1994,29 @@ export class CopyTradeEngine {
             const deltaPct = prevLeaderPos.amount > 0 ? deltaAmount / prevLeaderPos.amount : 0;
 
             if (deltaAmount > 0 && deltaPct >= 0.02) {
+              // Hitung harga implied layer riil dari penambahan muatan Leader
+              let leaderLayerPrice = leaderPos.entryPrice;
+              if (prevLeaderPos && prevLeaderPos.amount > 0 && deltaAmount > 0 && prevLeaderPos.entryPrice > 0) {
+                const prevNotional = prevLeaderPos.amount * prevLeaderPos.entryPrice;
+                const currentNotional = leaderPos.amount * leaderPos.entryPrice;
+                const layerNotional = currentNotional - prevNotional;
+                const calcLayerPrice = layerNotional / deltaAmount;
+                if (calcLayerPrice > 0 && Number.isFinite(calcLayerPrice)) {
+                  leaderLayerPrice = calcLayerPrice;
+                }
+              }
+
               // Leader Menambah Posisi (Averaging Down / Scaling In)
-              this.log('INFO', `📈 LEADER MENAMBAH POSISI: ${leaderPos.symbol} ${leaderPos.positionSide} (+${deltaAmount.toFixed(4)} koin, +${(deltaPct * 100).toFixed(1)}%)`);
+              this.log('INFO', `📈 LEADER MENAMBAH POSISI: ${leaderPos.symbol} ${leaderPos.positionSide} (+${deltaAmount.toFixed(4)} koin, +${(deltaPct * 100).toFixed(1)}%) | Harga Layer: $${leaderLayerPrice.toFixed(4)} | Rata-rata Leader: $${leaderPos.entryPrice}`);
               if (this.config.weekendBreak?.enabled && this.config.weekendBreak?.autoAbortOnLeaderTrade !== false && (this.isHolidayActive || weekendStatus.isHolidayActive || (weekendStatus.isWeekendWIB && !this.isHolidayAborted))) {
-                this.abortWeekendHoliday(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
+                this.abortWeekendHoliday(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%) @ $${leaderLayerPrice.toFixed(4)}`);
               }
               const dailyScheduleStatus = this.getDailyScheduleStatus();
               if (this.config.dailySchedule?.enabled && this.config.dailySchedule?.autoAbortOnLeaderTrade !== false && (dailyScheduleStatus.isSleeping || (this.isScheduleSleeping && !this.isScheduleAborted))) {
-                this.abortDailySchedule(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%)`);
+                this.abortDailySchedule(`Tambah posisi ${leaderPos.symbol} (${leaderPos.positionSide})`, `+${deltaAmount.toFixed(4)} koin (+${(deltaPct * 100).toFixed(1)}%) @ $${leaderLayerPrice.toFixed(4)}`);
               }
               const { userPos } = this.getUserPositionForLeader(leaderPos.symbol, leaderPos.positionSide, userPositionsMap);
-              const avgRes = await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPos);
+              const avgRes = await this.handleAveraging(leaderPos, deltaAmount, prevLeaderPos.amount, userBalance, userPos, leaderLayerPrice);
               if (avgRes && userPos) {
                 const actualKey = `${userPos.symbol}_${userPos.positionSide}`;
                 const uPos = userPositionsMap.get(actualKey);
@@ -2439,7 +2468,8 @@ export class CopyTradeEngine {
     deltaAmount: number,
     prevTotalLeaderQty: number,
     userBalance: number,
-    existingUserPos?: UserPosition
+    existingUserPos?: UserPosition,
+    leaderLayerPriceOverride?: number
   ): Promise<{ addedQty: number; newTotalQty: number; newEntryPrice: number } | null> {
     if (!this.config.paperTrading && !binanceClient.isConfigured()) return null;
     if (!existingUserPos) return null;
@@ -2454,62 +2484,122 @@ export class CopyTradeEngine {
     const filter = await binanceClient.getSymbolFilter(leaderPos.symbol);
     const markPrice = leaderPos.markPrice > 0 ? leaderPos.markPrice : leaderPos.entryPrice;
 
-    // Slippage Guard pada order averaging down (Directional Asymmetric)
-    const userSide = existingUserPos.positionSide;
-    let adverseSlippagePct = 0;
-    let favorableSlippagePct = 0;
+    // Harga acuan layer leader yang riil (bukan hanya rata-rata gabungan leader)
+    const effectiveLayerPrice = (leaderLayerPriceOverride && leaderLayerPriceOverride > 0)
+      ? leaderLayerPriceOverride
+      : leaderPos.entryPrice;
 
-    if (leaderPos.entryPrice > 0 && markPrice > 0) {
+    // Slippage Guard pada order averaging down (Dual-Check: Layer Slippage & BEP Protection)
+    const userSide = existingUserPos.positionSide;
+    let layerSlippagePct = 0;
+    let layerFavorablePct = 0;
+
+    if (effectiveLayerPrice > 0 && markPrice > 0) {
       if (userSide === 'LONG') {
-        if (markPrice > leaderPos.entryPrice) {
-          adverseSlippagePct = ((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+        if (markPrice > effectiveLayerPrice) {
+          layerSlippagePct = ((markPrice - effectiveLayerPrice) / effectiveLayerPrice) * 100;
         } else {
-          favorableSlippagePct = ((leaderPos.entryPrice - markPrice) / leaderPos.entryPrice) * 100;
+          layerFavorablePct = ((effectiveLayerPrice - markPrice) / effectiveLayerPrice) * 100;
         }
       } else {
         // SHORT
-        if (markPrice < leaderPos.entryPrice) {
-          adverseSlippagePct = ((leaderPos.entryPrice - markPrice) / leaderPos.entryPrice) * 100;
+        if (markPrice < effectiveLayerPrice) {
+          layerSlippagePct = ((effectiveLayerPrice - markPrice) / effectiveLayerPrice) * 100;
         } else {
-          favorableSlippagePct = ((markPrice - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+          layerFavorablePct = ((markPrice - effectiveLayerPrice) / effectiveLayerPrice) * 100;
+        }
+      }
+    }
+
+    // Hitung proyeksi harga rata-rata akun pengguna setelah penambahan layer pada markPrice saat ini
+    const oldQty = userCurrentQty;
+    const oldEntry = existingUserPos.entryPrice;
+    const projectedTotalQty = oldQty + addQty;
+    const userProjectedEntry = projectedTotalQty > 0
+      ? (oldQty * oldEntry + addQty * markPrice) / projectedTotalQty
+      : markPrice;
+
+    // Proteksi BEP (Break-Even Price): Pastikan rata-rata entri user tidak lebih buruk dari rata-rata Leader!
+    let bepAdversePct = 0;
+    if (leaderPos.entryPrice > 0 && userProjectedEntry > 0) {
+      if (userSide === 'LONG') {
+        if (userProjectedEntry > leaderPos.entryPrice) {
+          bepAdversePct = ((userProjectedEntry - leaderPos.entryPrice) / leaderPos.entryPrice) * 100;
+        }
+      } else {
+        // SHORT
+        if (userProjectedEntry < leaderPos.entryPrice) {
+          bepAdversePct = ((leaderPos.entryPrice - userProjectedEntry) / leaderPos.entryPrice) * 100;
+        }
+      }
+    }
+
+    // Total Adverse Slippage = nilai terburuk antara selisih harga layer atau selisih rata-rata BEP
+    const adverseSlippagePct = Math.max(layerSlippagePct, bepAdversePct);
+    const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+
+    if (adverseSlippagePct > allowedAdversePct) {
+      // Hitung target pullback price:
+      // Harga pasar harus pullback ke level layer leader ATAU ke level yang memastikan BEP user <= BEP leader
+      let bepTargetPrice = effectiveLayerPrice;
+      if (addQty > 0 && leaderPos.entryPrice > 0) {
+        const targetPriceForBep = ((projectedTotalQty * leaderPos.entryPrice) - (oldQty * oldEntry)) / addQty;
+        if (targetPriceForBep > 0 && Number.isFinite(targetPriceForBep)) {
+          bepTargetPrice = targetPriceForBep;
         }
       }
 
-      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
-
-      if (adverseSlippagePct > allowedAdversePct) {
-        const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
-        this.slippageSkippedOrders.set(posKey, {
-          symbol: leaderPos.symbol,
-          positionSide: leaderPos.positionSide,
-          type: 'AVERAGING',
-          leaderEntryPrice: leaderPos.entryPrice,
-          markPrice: markPrice,
-          slippagePct: adverseSlippagePct,
-          adverseSlippagePct,
-          targetPullbackPrice: leaderPos.entryPrice,
-          isSniperPending: true,
-          notifiedSniper: true,
-          skippedAt: Date.now(),
-          reason: `Averaging market price ($${markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dibanding entry leader ($${leaderPos.entryPrice}). Auto-Sniper aktif memantau pullback.`,
-        });
-        this.saveVirtualState();
-
-        const windowMins = this.config.reorderWindowMinutes || 30;
-        const targetOp = userSide === 'LONG' ? '≤' : '≥';
-        this.log('WARN', `🎯 [AUTO-SNIPER AVG AKTIF] Averaging ${leaderPos.symbol} (${userSide}) ditahan: Harga pasar ($${markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dari entry leader ($${leaderPos.entryPrice}). Bot memantau pullback ke ${targetOp} $${leaderPos.entryPrice}.`);
-        this.sendTelegramRateLimited(
-          `SLIPPAGE_AVG_${posKey}`,
-          `🎯 <b>AVERAGING DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
-          `🪙 Simbol: <b>${leaderPos.symbol}</b> (${userSide})\n` +
-          `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
-          `📈 Harga Pasar Saat Ini: <b>$${markPrice}</b>\n` +
-          `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n\n` +
-          `🛡️ <i>Sistem menahan penambahan layer demi memastikan harga averaging sama atau lebih menguntungkan. Bot memantau chart dan akan <b>OTOMATIS MENAMBAH LAYER</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b>.</i>`,
-          60000
-        );
-        return null;
+      let targetPullbackPrice = effectiveLayerPrice;
+      if (userSide === 'LONG') {
+        targetPullbackPrice = Math.min(effectiveLayerPrice, bepTargetPrice > 0 ? bepTargetPrice : effectiveLayerPrice);
+      } else {
+        targetPullbackPrice = Math.max(effectiveLayerPrice, bepTargetPrice > 0 ? bepTargetPrice : effectiveLayerPrice);
       }
+
+      const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+      this.slippageSkippedOrders.set(posKey, {
+        symbol: leaderPos.symbol,
+        positionSide: leaderPos.positionSide,
+        type: 'AVERAGING',
+        leaderEntryPrice: leaderPos.entryPrice,
+        leaderLayerPrice: effectiveLayerPrice,
+        userProjectedEntry,
+        bepDifferencePct: bepAdversePct,
+        markPrice,
+        slippagePct: adverseSlippagePct,
+        adverseSlippagePct,
+        targetPullbackPrice,
+        deltaAmount,
+        prevLeaderAmount: prevTotalLeaderQty,
+        isSniperPending: true,
+        notifiedSniper: true,
+        skippedAt: Date.now(),
+        reason: `Averaging market price ($${markPrice}) lebih buruk dari layer leader ($${effectiveLayerPrice.toFixed(4)}, +${layerSlippagePct.toFixed(2)}%) atau proyeksi BEP ($${userProjectedEntry.toFixed(4)} vs leader $${leaderPos.entryPrice}, +${bepAdversePct.toFixed(2)}%). Auto-Sniper aktif memantau pullback.`,
+      });
+      this.saveVirtualState();
+
+      const windowMins = this.config.reorderWindowMinutes || 30;
+      const targetOp = userSide === 'LONG' ? '≤' : '≥';
+      const reasonText = layerSlippagePct > allowedAdversePct
+        ? `Harga pasar ($${markPrice}) lebih buruk +${layerSlippagePct.toFixed(2)}% dibanding harga layer leader ($${effectiveLayerPrice.toFixed(4)})`
+        : `Proyeksi rata-rata entri Anda ($${userProjectedEntry.toFixed(4)}) lebih buruk +${bepAdversePct.toFixed(2)}% dari rata-rata Leader ($${leaderPos.entryPrice})`;
+
+      this.log('WARN', `🎯 [AUTO-SNIPER AVG AKTIF] Averaging ${leaderPos.symbol} (${userSide}) ditahan: ${reasonText}. Bot memantau pullback ke ${targetOp} $${targetPullbackPrice.toFixed(4)}.`);
+      this.sendTelegramRateLimited(
+        `SLIPPAGE_AVG_${posKey}`,
+        `🎯 <b>AVERAGING DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
+        `🪙 Simbol: <b>${leaderPos.symbol}</b> (${userSide})\n` +
+        `👤 Harga Layer Leader: <b>$${effectiveLayerPrice.toFixed(4)}</b>\n` +
+        `📈 Harga Pasar Saat Ini: <b>$${markPrice}</b>\n` +
+        `⚠️ Selisih Layer: <b>+${layerSlippagePct.toFixed(2)}%</b>\n` +
+        `📊 Rata-rata Leader Saat Ini: <b>$${leaderPos.entryPrice}</b>\n` +
+        `🎯 Proyeksi Rata-rata Akun Anda: <b>$${userProjectedEntry.toFixed(4)}</b>\n` +
+        (bepAdversePct > 0 ? `⚠️ Risiko BEP Divergence: <b>+${bepAdversePct.toFixed(2)}% lebih mahal</b>\n` : '') +
+        `🎯 Target Pullback Sniper: <b>${targetOp} $${targetPullbackPrice.toFixed(4)}</b>\n\n` +
+        `🛡️ <i>Sistem menahan penambahan layer demi memastikan harga averaging sama atau lebih menguntungkan, serta <b>MENGUNCI PROTEKSI BEP</b> agar akun Anda tidak merugi jika Leader menutup posisi di Break-Even Point. Bot akan <b>OTOMATIS MENAMBAH LAYER</b> seketika harga pullback.</i>`,
+        60000
+      );
+      return null;
     }
 
     // Safety Cap check berdasarkan Margin modal
@@ -3195,7 +3285,7 @@ export class CopyTradeEngine {
           }
         } else if (item.type === 'AVERAGING') {
           try {
-            const res = await this.syncAveragingDown(item.symbol, item.positionSide, leaderPos);
+            const res = await this.syncAveragingDown(item.symbol, item.positionSide, leaderPos, true);
             if (res.success) {
               this.slippageSkippedOrders.delete(posKey);
               this.saveVirtualState();
@@ -3208,17 +3298,23 @@ export class CopyTradeEngine {
                 ? (leaderPos.amount * leaderPos.entryPrice) / Math.max(1, leaderPos.leverage || 10)
                 : 0;
 
+              const discountText = discountPct > 0
+                ? `🔥 Diskon +${discountPct.toFixed(2)}% Lebih Murah!`
+                : `⚡ 0.00% (Slippage Nol / BEP Protected)`;
+
               this.sendTelegram(
                 `🎯 <b>AUTO-SNIPER AVERAGING DOWN MATCH! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +
                 `🪙 Simbol: <b>${item.symbol}</b> (${targetUserSide})\n` +
-                `👤 Entry Leader: <b>$${targetPrice}</b>\n` +
-                `🎯 Harga Eksekusi: <b>$${markPrice}</b>\n` +
+                `👤 Target Pullback: <b>$${targetPrice.toFixed(4)}</b>\n` +
+                `🎯 Harga Eksekusi: <b>$${markPrice}</b> (${discountText})\n` +
+                `📊 Rata-rata Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+                (userPos ? `🛡️ Rata-rata Akun Anda: <b>$${userPos.entryPrice.toFixed(4)}</b> (BEP Safe)\n` : '') +
                 `📦 Tambahan Volume: <b>+${addedQty}</b>\n` +
                 `⚡ Leverage: <b>${lev}x</b>\n` +
                 `💵 Tambahan Margin: <b>+$${addedMargin.toFixed(2)} USDT</b>\n` +
                 `💰 Total Margin Posisi: <b>$${totalMargin.toFixed(2)} USDT</b>\n` +
                 (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
-                `⚡ Mode: <b>Auto-Sniper Pullback Averaging</b>`
+                `⚡ Mode: <b>Auto-Sniper Pullback Averaging (BEP Protected)</b>`
               );
             }
           } catch (err: any) {
@@ -3235,7 +3331,8 @@ export class CopyTradeEngine {
   async syncAveragingDown(
     symbol: string,
     positionSide: 'LONG' | 'SHORT',
-    leaderPosOverride?: LeadPosition
+    leaderPosOverride?: LeadPosition,
+    isAutoSniper: boolean = false
   ): Promise<{ success: boolean; message: string; addQty?: number }> {
     const sym = symbol.toUpperCase();
     const posKey = `${sym}_${positionSide}`;
@@ -3352,16 +3449,18 @@ export class CopyTradeEngine {
       this.slippageSkippedOrders.delete(posKey);
       this.slippageSkippedOrders.delete(userPosKey);
       this.saveVirtualState();
-      this.log('SUCCESS', `🧪 [MANUAL SYNC AVG DOWN] Berhasil sinkronisasi virtual averaging ${sym} (${userSide}) (+${neededAddQty} @ $${markPrice})!`);
-      this.sendTelegram(
-        `⚡ <b>SINKRONISASI AVERAGING DOWN BERHASIL [🧪 SIMULASI]</b>\n\n` +
-        `🪙 Simbol: <b>${sym}</b>\n` +
-        `📊 Arah Akun: <b>${userSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
-        `🔄 Status: <b>Disinkronkan ke ${counts.user}x (${counts.user + 1} Layer)</b>\n` +
-        `💵 Harga: <b>$${markPrice}</b>\n` +
-        `📦 Tambahan Volume: <b>+${neededAddQty}</b>\n` +
-        `⚡ Mode: <b>Manual Sync Avg (Simulasi)</b>`
-      );
+      this.log('SUCCESS', `🧪 [${isAutoSniper ? 'AUTO-SNIPER AVG' : 'MANUAL SYNC AVG DOWN'}] Berhasil sinkronisasi virtual averaging ${sym} (${userSide}) (+${neededAddQty} @ $${markPrice})!`);
+      if (!isAutoSniper) {
+        this.sendTelegram(
+          `⚡ <b>SINKRONISASI AVERAGING DOWN BERHASIL [🧪 SIMULASI]</b>\n\n` +
+          `🪙 Simbol: <b>${sym}</b>\n` +
+          `📊 Arah Akun: <b>${userSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+          `🔄 Status: <b>Disinkronkan ke ${counts.user}x (${counts.user + 1} Layer)</b>\n` +
+          `💵 Harga: <b>$${markPrice}</b>\n` +
+          `📦 Tambahan Volume: <b>+${neededAddQty}</b>\n` +
+          `⚡ Mode: <b>Manual Sync Avg (Simulasi)</b>`
+        );
+      }
       return {
         success: true,
         message: `✅ Berhasil sinkronisasi virtual averaging ${sym} (${userSide}) (+${neededAddQty} koin).`,
@@ -3371,7 +3470,7 @@ export class CopyTradeEngine {
 
     // Live Binance
     const side: 'BUY' | 'SELL' = userSide === 'LONG' ? 'BUY' : 'SELL';
-    this.log('INFO', `⚡ [MANUAL SYNC AVG DOWN] Mengirim order averaging ke Binance: ${sym} ${side} ${neededAddQty} (${userSide})...`);
+    this.log('INFO', `⚡ [${isAutoSniper ? 'AUTO-SNIPER AVG' : 'MANUAL SYNC AVG DOWN'}] Mengirim order averaging ke Binance: ${sym} ${side} ${neededAddQty} (${userSide})...`);
     const orderRes = await binanceClient.placeMarketOrder(sym, side, neededAddQty, false, userSide);
     counts.user = counts.leader > 0 ? counts.leader : (counts.user || 0) + 1;
     this.positionAvgCounts.set(posKey, counts);
@@ -3382,16 +3481,18 @@ export class CopyTradeEngine {
     this.slippageSkippedOrders.delete(userPosKey);
     this.saveVirtualState();
 
-    this.log('SUCCESS', `✅ [MANUAL SYNC AVG DOWN] Berhasil mengeksekusi averaging down susulan pada ${sym} (${userSide}) (+${neededAddQty} @ $${markPrice})! Order ID: ${orderRes.orderId}`);
-    this.sendTelegram(
-      `⚡ <b>SINKRONISASI AVERAGING DOWN BERHASIL [🟢 LIVE FUTURES]</b>\n\n` +
-      `🪙 Simbol: <b>${sym}</b>\n` +
-      `📊 Arah Akun: <b>${userSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
-      `🔄 Status: <b>Disinkronkan ke ${counts.user}x (${counts.user + 1} Layer)</b>\n` +
-      `💵 Harga: <b>$${markPrice}</b>\n` +
-      `📦 Tambahan Volume: <b>+${neededAddQty}</b>\n` +
-      `⚡ Order ID: <code>${orderRes.orderId || 'OK'}</code>`
-    );
+    this.log('SUCCESS', `✅ [${isAutoSniper ? 'AUTO-SNIPER AVG' : 'MANUAL SYNC AVG DOWN'}] Berhasil mengeksekusi averaging down pada ${sym} (${userSide}) (+${neededAddQty} @ $${markPrice})! Order ID: ${orderRes.orderId}`);
+    if (!isAutoSniper) {
+      this.sendTelegram(
+        `⚡ <b>SINKRONISASI AVERAGING DOWN BERHASIL [🟢 LIVE FUTURES]</b>\n\n` +
+        `🪙 Simbol: <b>${sym}</b>\n` +
+        `📊 Arah Akun: <b>${userSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>\n` +
+        `🔄 Status: <b>Disinkronkan ke ${counts.user}x (${counts.user + 1} Layer)</b>\n` +
+        `💵 Harga: <b>$${markPrice}</b>\n` +
+        `📦 Tambahan Volume: <b>+${neededAddQty}</b>\n` +
+        `⚡ Order ID: <code>${orderRes.orderId || 'OK'}</code>`
+      );
+    }
 
     return {
       success: true,

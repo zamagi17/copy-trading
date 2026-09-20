@@ -25,6 +25,10 @@
     "afternoonIntervalMs": 3000,
     "nightIntervalMs": 1500
   },
+  "hybridPolling": {
+    "enabled": true,
+    "snapshotIntervalSec": 60
+  },
   "weekendBreak": {
     "enabled": true,
     "timezone": "WIB",
