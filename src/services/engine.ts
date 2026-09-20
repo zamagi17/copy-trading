@@ -371,6 +371,8 @@ export class CopyTradeEngine {
     if (!parsed.reorderWindowMinutes) parsed.reorderWindowMinutes = 30;
     if (parsed.zeroSlippageOnly === undefined) parsed.zeroSlippageOnly = true;
     if (parsed.sniperPullbackEnabled === undefined) parsed.sniperPullbackEnabled = true;
+    if (parsed.discountEntryEnabled === undefined) parsed.discountEntryEnabled = false;
+    if (parsed.discountEntryPct === undefined || isNaN(Number(parsed.discountEntryPct))) parsed.discountEntryPct = 1.0;
     if (parsed.ratioMultiplier === undefined) parsed.ratioMultiplier = 1.0;
     if (parsed.fixedAmountUsdt === undefined) parsed.fixedAmountUsdt = 25.0;
     if (parsed.maxModalPerCoin === undefined) parsed.maxModalPerCoin = 0;
@@ -429,6 +431,8 @@ export class CopyTradeEngine {
       reorderWindowMinutes: 30,
       zeroSlippageOnly: true,
       sniperPullbackEnabled: true,
+      discountEntryEnabled: false,
+      discountEntryPct: 1.0,
       syncLeverage: true,
       emergencySlPct: 10.0,
       pollingIntervalMs: 2500,
@@ -2257,55 +2261,115 @@ export class CopyTradeEngine {
         }
       }
 
-      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+      const isDiscountMode = Boolean(this.config.discountEntryEnabled);
+      const reqDiscountPct = Number(this.config.discountEntryPct) || 1.0;
 
-      if (adverseSlippagePct > allowedAdversePct) {
-        const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
-        this.slippageSkippedOrders.set(posKey, {
-          symbol: leaderPos.symbol,
-          positionSide: leaderPos.positionSide,
-          type: 'NEW_POSITION',
-          leaderEntryPrice: leaderPos.entryPrice,
-          markPrice: leaderPos.markPrice,
-          slippagePct: adverseSlippagePct,
-          adverseSlippagePct,
-          targetPullbackPrice: leaderPos.entryPrice,
-          isSniperPending: true,
-          notifiedSniper: true,
-          skippedAt: Date.now(),
-          reason: `Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dari entry leader ($${leaderPos.entryPrice}). Auto-Sniper aktif memantau pullback.`,
-        });
-        this.saveVirtualState();
+      if (isDiscountMode) {
+        // Mode Sniper Diskon Pullback Aktif: Wajib masuk dengan diskon minimal tertentu lebih menguntungkan dari leader
+        const targetDiscountPrice = userPositionSide === 'LONG'
+          ? leaderPos.entryPrice * (1 - (reqDiscountPct / 100))
+          : leaderPos.entryPrice * (1 + (reqDiscountPct / 100));
 
-        const windowMins = this.config.reorderWindowMinutes || 30;
-        const targetOp = userPositionSide === 'LONG' ? '≤' : '≥';
-        const invTag = isInverse ? ' (🔄 Inversi)' : '';
-        const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || leaderPos.markPrice > 0))
-          ? (leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)) / Math.max(1, leaderPos.leverage || 10)
-          : 0;
-        const sniperEstMargin = (this.config.mode === 'FIXED_AMOUNT'
-          ? this.config.fixedAmountUsdt
-          : (this.config.mode === 'FIXED_RATIO'
-            ? userBalance * 0.05 * this.config.ratioMultiplier
-            : (userBalance / (this.lastLeaderEquity || 50000)) * this.config.ratioMultiplier * leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)
-          )) / Math.max(1, leaderPos.leverage || 10);
+        if (favorableSlippagePct < reqDiscountPct) {
+          const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+          this.slippageSkippedOrders.set(posKey, {
+            symbol: leaderPos.symbol,
+            positionSide: leaderPos.positionSide,
+            type: 'NEW_POSITION',
+            leaderEntryPrice: leaderPos.entryPrice,
+            markPrice: leaderPos.markPrice,
+            slippagePct: adverseSlippagePct > 0 ? adverseSlippagePct : -favorableSlippagePct,
+            adverseSlippagePct,
+            targetPullbackPrice: targetDiscountPrice,
+            isSniperPending: true,
+            notifiedSniper: true,
+            skippedAt: Date.now(),
+            reason: `Auto-Sniper Diskon Pullback (${reqDiscountPct.toFixed(1)}%) aktif. Harga pasar ($${leaderPos.markPrice}) belum mencapai target diskon ($${targetDiscountPrice.toFixed(4)} vs entry leader $${leaderPos.entryPrice}).`,
+          });
+          this.saveVirtualState();
 
-        this.log('WARN', `🎯 [AUTO-SNIPER AKTIF] Order ${leaderPos.symbol} (${userPositionSide}${invTag}) ditahan: Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dibanding entry leader ($${leaderPos.entryPrice}). Bot otomatis memantau pullback ke ${targetOp} $${leaderPos.entryPrice} selama ${windowMins} menit.`);
-        this.sendTelegramRateLimited(
-          `SNIPER_PENDING_${posKey}`,
-          `🎯 <b>ORDER DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
-          `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
-          `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${invTag}\n` +
-          `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
-          `📈 Harga Pasar Saat Ini: <b>$${leaderPos.markPrice}</b>\n` +
-          `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n` +
-          `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
-          `💰 Estimasi Margin Order: <b>$${Math.max(5, sniperEstMargin).toFixed(2)} USDT</b>\n` +
-          (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
-          `\n🛡️ <i>Sistem menahan order demi memastikan Slippage 0 / Diskon. Bot memantau chart setiap detik dan akan <b>OTOMATIS MASUK</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b> (sisa batas toleransi ${windowMins} menit).</i>`,
-          60000
-        );
-        return null;
+          const windowMins = this.config.reorderWindowMinutes || 30;
+          const targetOp = userPositionSide === 'LONG' ? '≤' : '≥';
+          const invTag = isInverse ? ' (🔄 Inversi)' : '';
+          const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || leaderPos.markPrice > 0))
+            ? (leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)) / Math.max(1, leaderPos.leverage || 10)
+            : 0;
+          const sniperEstMargin = (this.config.mode === 'FIXED_AMOUNT'
+            ? this.config.fixedAmountUsdt
+            : (this.config.mode === 'FIXED_RATIO'
+              ? userBalance * 0.05 * this.config.ratioMultiplier
+              : (userBalance / (this.lastLeaderEquity || 50000)) * this.config.ratioMultiplier * leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)
+            )) / Math.max(1, leaderPos.leverage || 10);
+
+          this.log('WARN', `🎯 [AUTO-SNIPER DISKON AKTIF] Order ${leaderPos.symbol} (${userPositionSide}${invTag}) ditahan: Menunggu diskon minimal ${reqDiscountPct.toFixed(1)}% lebih menguntungkan dari leader (Target: ${targetOp} $${targetDiscountPrice.toFixed(4)} | Entry Leader: $${leaderPos.entryPrice}). Bot memantau selama ${windowMins} menit.`);
+          this.sendTelegramRateLimited(
+            `SNIPER_PENDING_${posKey}`,
+            `🎯 <b>ORDER DITAHAN - AUTO-SNIPER DISKON PULLBACK AKTIF</b>\n\n` +
+            `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+            `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${invTag}\n` +
+            `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+            `🎯 Target Diskon Entry (${reqDiscountPct.toFixed(1)}% Lebih Untung): <b>${targetOp} $${targetDiscountPrice.toFixed(4)}</b>\n` +
+            `📈 Harga Pasar Saat Ini: <b>$${leaderPos.markPrice}</b>\n` +
+            (adverseSlippagePct > 0 ? `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n` : `ℹ️ Diskon Saat Ini: <b>+${favorableSlippagePct.toFixed(2)}% (Belum capai target ${reqDiscountPct.toFixed(1)}%)</b>\n`) +
+            `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+            `💰 Estimasi Margin Order: <b>$${Math.max(5, sniperEstMargin).toFixed(2)} USDT</b>\n` +
+            (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
+            `\n🛡️ <i>Sistem menahan order demi memastikan entry dengan diskon pullback minimal <b>${reqDiscountPct.toFixed(1)}%</b> lebih menguntungkan dari Leader. Bot memantau chart setiap saat dan akan <b>OTOMATIS MASUK</b> begitu harga mencapai <b>${targetOp} $${targetDiscountPrice.toFixed(4)}</b> (sisa batas toleransi ${windowMins} menit).</i>`,
+            60000
+          );
+          return null;
+        }
+      } else {
+        const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+
+        if (adverseSlippagePct > allowedAdversePct) {
+          const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
+          this.slippageSkippedOrders.set(posKey, {
+            symbol: leaderPos.symbol,
+            positionSide: leaderPos.positionSide,
+            type: 'NEW_POSITION',
+            leaderEntryPrice: leaderPos.entryPrice,
+            markPrice: leaderPos.markPrice,
+            slippagePct: adverseSlippagePct,
+            adverseSlippagePct,
+            targetPullbackPrice: leaderPos.entryPrice,
+            isSniperPending: true,
+            notifiedSniper: true,
+            skippedAt: Date.now(),
+            reason: `Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dari entry leader ($${leaderPos.entryPrice}). Auto-Sniper aktif memantau pullback.`,
+          });
+          this.saveVirtualState();
+
+          const windowMins = this.config.reorderWindowMinutes || 30;
+          const targetOp = userPositionSide === 'LONG' ? '≤' : '≥';
+          const invTag = isInverse ? ' (🔄 Inversi)' : '';
+          const leaderMargin = (leaderPos.amount > 0 && (leaderPos.entryPrice > 0 || leaderPos.markPrice > 0))
+            ? (leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)) / Math.max(1, leaderPos.leverage || 10)
+            : 0;
+          const sniperEstMargin = (this.config.mode === 'FIXED_AMOUNT'
+            ? this.config.fixedAmountUsdt
+            : (this.config.mode === 'FIXED_RATIO'
+              ? userBalance * 0.05 * this.config.ratioMultiplier
+              : (userBalance / (this.lastLeaderEquity || 50000)) * this.config.ratioMultiplier * leaderPos.amount * (leaderPos.entryPrice || leaderPos.markPrice)
+            )) / Math.max(1, leaderPos.leverage || 10);
+
+          this.log('WARN', `🎯 [AUTO-SNIPER AKTIF] Order ${leaderPos.symbol} (${userPositionSide}${invTag}) ditahan: Harga pasar ($${leaderPos.markPrice}) lebih buruk +${adverseSlippagePct.toFixed(2)}% dibanding entry leader ($${leaderPos.entryPrice}). Bot otomatis memantau pullback ke ${targetOp} $${leaderPos.entryPrice} selama ${windowMins} menit.`);
+          this.sendTelegramRateLimited(
+            `SNIPER_PENDING_${posKey}`,
+            `🎯 <b>ORDER DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
+            `🪙 Simbol: <b>${leaderPos.symbol}</b>\n` +
+            `📊 Posisi Akun: <b>${userPositionSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${invTag}\n` +
+            `👤 Entry Leader: <b>$${leaderPos.entryPrice}</b>\n` +
+            `📈 Harga Pasar Saat Ini: <b>$${leaderPos.markPrice}</b>\n` +
+            `⚠️ Selisih Kurang Menguntungkan: <b>+${adverseSlippagePct.toFixed(2)}%</b>\n` +
+            `⚡ Leverage: <b>${leaderPos.leverage || 10}x</b>\n` +
+            `💰 Estimasi Margin Order: <b>$${Math.max(5, sniperEstMargin).toFixed(2)} USDT</b>\n` +
+            (leaderMargin > 0 ? `👤 Margin Leader: <b>$${leaderMargin.toFixed(2)} USDT</b>\n` : '') +
+            `\n🛡️ <i>Sistem menahan order demi memastikan Slippage 0 / Diskon. Bot memantau chart setiap detik dan akan <b>OTOMATIS MASUK</b> begitu harga pullback ke <b>${targetOp} $${leaderPos.entryPrice}</b> (sisa batas toleransi ${windowMins} menit).</i>`,
+            60000
+          );
+          return null;
+        }
       }
     }
 
@@ -2534,28 +2598,61 @@ export class CopyTradeEngine {
       }
     }
 
-    // Total Adverse Slippage = nilai terburuk antara selisih harga layer atau selisih rata-rata BEP
-    const adverseSlippagePct = Math.max(layerSlippagePct, bepAdversePct);
-    const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+    const isDiscountMode = Boolean(this.config.discountEntryEnabled);
+    const reqDiscountPct = Number(this.config.discountEntryPct) || 1.0;
 
-    if (adverseSlippagePct > allowedAdversePct) {
-      // Hitung target pullback price:
-      // Harga pasar harus pullback ke level layer leader ATAU ke level yang memastikan BEP user <= BEP leader
-      let bepTargetPrice = effectiveLayerPrice;
-      if (addQty > 0 && leaderPos.entryPrice > 0) {
-        const targetPriceForBep = ((projectedTotalQty * leaderPos.entryPrice) - (oldQty * oldEntry)) / addQty;
-        if (targetPriceForBep > 0 && Number.isFinite(targetPriceForBep)) {
-          bepTargetPrice = targetPriceForBep;
-        }
+    // Hitung target pullback price:
+    // Harga pasar harus pullback ke level layer leader (atau target diskon) ATAU ke level yang memastikan BEP user <= BEP leader
+    let bepTargetPrice = effectiveLayerPrice;
+    if (addQty > 0 && leaderPos.entryPrice > 0) {
+      const targetPriceForBep = ((projectedTotalQty * leaderPos.entryPrice) - (oldQty * oldEntry)) / addQty;
+      if (targetPriceForBep > 0 && Number.isFinite(targetPriceForBep)) {
+        bepTargetPrice = targetPriceForBep;
       }
+    }
 
-      let targetPullbackPrice = effectiveLayerPrice;
-      if (userSide === 'LONG') {
-        targetPullbackPrice = Math.min(effectiveLayerPrice, bepTargetPrice > 0 ? bepTargetPrice : effectiveLayerPrice);
-      } else {
-        targetPullbackPrice = Math.max(effectiveLayerPrice, bepTargetPrice > 0 ? bepTargetPrice : effectiveLayerPrice);
+    let targetBaseLayerPrice = effectiveLayerPrice;
+    if (isDiscountMode) {
+      targetBaseLayerPrice = userSide === 'LONG'
+        ? effectiveLayerPrice * (1 - (reqDiscountPct / 100))
+        : effectiveLayerPrice * (1 + (reqDiscountPct / 100));
+    }
+
+    let targetPullbackPrice = targetBaseLayerPrice;
+    if (userSide === 'LONG') {
+      targetPullbackPrice = Math.min(targetBaseLayerPrice, bepTargetPrice > 0 ? bepTargetPrice : targetBaseLayerPrice);
+    } else {
+      targetPullbackPrice = Math.max(targetBaseLayerPrice, bepTargetPrice > 0 ? bepTargetPrice : targetBaseLayerPrice);
+    }
+
+    // Evaluasi apakah harus ditahan
+    let shouldHoldAveraging = false;
+    let adverseSlippagePct = 0;
+    let reasonText = '';
+
+    if (isDiscountMode) {
+      const isDiscountSatisfied = userSide === 'LONG'
+        ? markPrice <= targetPullbackPrice
+        : markPrice >= targetPullbackPrice;
+
+      if (!isDiscountSatisfied) {
+        shouldHoldAveraging = true;
+        adverseSlippagePct = layerSlippagePct > 0 ? layerSlippagePct : Math.max(0, reqDiscountPct - layerFavorablePct);
+        const targetOp = userSide === 'LONG' ? '≤' : '≥';
+        reasonText = `Menunggu diskon minimal ${reqDiscountPct.toFixed(1)}% lebih murah dari layer leader (Target: ${targetOp} $${targetPullbackPrice.toFixed(4)} vs Layer Leader $${effectiveLayerPrice.toFixed(4)})`;
       }
+    } else {
+      adverseSlippagePct = Math.max(layerSlippagePct, bepAdversePct);
+      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+      if (adverseSlippagePct > allowedAdversePct) {
+        shouldHoldAveraging = true;
+        reasonText = layerSlippagePct > allowedAdversePct
+          ? `Harga pasar ($${markPrice}) lebih buruk +${layerSlippagePct.toFixed(2)}% dibanding harga layer leader ($${effectiveLayerPrice.toFixed(4)})`
+          : `Proyeksi rata-rata entri Anda ($${userProjectedEntry.toFixed(4)}) lebih buruk +${bepAdversePct.toFixed(2)}% dari rata-rata Leader ($${leaderPos.entryPrice})`;
+      }
+    }
 
+    if (shouldHoldAveraging) {
       const posKey = `${leaderPos.symbol}_${leaderPos.positionSide}`;
       this.slippageSkippedOrders.set(posKey, {
         symbol: leaderPos.symbol,
@@ -2574,29 +2671,28 @@ export class CopyTradeEngine {
         isSniperPending: true,
         notifiedSniper: true,
         skippedAt: Date.now(),
-        reason: `Averaging market price ($${markPrice}) lebih buruk dari layer leader ($${effectiveLayerPrice.toFixed(4)}, +${layerSlippagePct.toFixed(2)}%) atau proyeksi BEP ($${userProjectedEntry.toFixed(4)} vs leader $${leaderPos.entryPrice}, +${bepAdversePct.toFixed(2)}%). Auto-Sniper aktif memantau pullback.`,
+        reason: isDiscountMode
+          ? `Auto-Sniper Diskon Averaging (${reqDiscountPct.toFixed(1)}%) aktif: ${reasonText}.`
+          : `Averaging market price ($${markPrice}) lebih buruk dari layer leader ($${effectiveLayerPrice.toFixed(4)}, +${layerSlippagePct.toFixed(2)}%) atau proyeksi BEP ($${userProjectedEntry.toFixed(4)} vs leader $${leaderPos.entryPrice}, +${bepAdversePct.toFixed(2)}%). Auto-Sniper aktif memantau pullback.`,
       });
       this.saveVirtualState();
 
       const windowMins = this.config.reorderWindowMinutes || 30;
       const targetOp = userSide === 'LONG' ? '≤' : '≥';
-      const reasonText = layerSlippagePct > allowedAdversePct
-        ? `Harga pasar ($${markPrice}) lebih buruk +${layerSlippagePct.toFixed(2)}% dibanding harga layer leader ($${effectiveLayerPrice.toFixed(4)})`
-        : `Proyeksi rata-rata entri Anda ($${userProjectedEntry.toFixed(4)}) lebih buruk +${bepAdversePct.toFixed(2)}% dari rata-rata Leader ($${leaderPos.entryPrice})`;
 
-      this.log('WARN', `🎯 [AUTO-SNIPER AVG AKTIF] Averaging ${leaderPos.symbol} (${userSide}) ditahan: ${reasonText}. Bot memantau pullback ke ${targetOp} $${targetPullbackPrice.toFixed(4)}.`);
+      this.log('WARN', `🎯 [AUTO-SNIPER AVG ${isDiscountMode ? 'DISKON ' : ''}AKTIF] Averaging ${leaderPos.symbol} (${userSide}) ditahan: ${reasonText}. Bot memantau pullback ke ${targetOp} $${targetPullbackPrice.toFixed(4)}.`);
       this.sendTelegramRateLimited(
         `SLIPPAGE_AVG_${posKey}`,
-        `🎯 <b>AVERAGING DITAHAN - AUTO-SNIPER PULLBACK AKTIF</b>\n\n` +
+        `🎯 <b>AVERAGING DITAHAN - AUTO-SNIPER ${isDiscountMode ? 'DISKON ' : ''}PULLBACK AKTIF</b>\n\n` +
         `🪙 Simbol: <b>${leaderPos.symbol}</b> (${userSide})\n` +
         `👤 Harga Layer Leader: <b>$${effectiveLayerPrice.toFixed(4)}</b>\n` +
         `📈 Harga Pasar Saat Ini: <b>$${markPrice}</b>\n` +
-        `⚠️ Selisih Layer: <b>+${layerSlippagePct.toFixed(2)}%</b>\n` +
+        (isDiscountMode ? `🎯 Target Diskon Pullback (${reqDiscountPct.toFixed(1)}%): <b>${targetOp} $${targetPullbackPrice.toFixed(4)}</b>\n` : `⚠️ Selisih Layer: <b>+${layerSlippagePct.toFixed(2)}%</b>\n`) +
         `📊 Rata-rata Leader Saat Ini: <b>$${leaderPos.entryPrice}</b>\n` +
         `🎯 Proyeksi Rata-rata Akun Anda: <b>$${userProjectedEntry.toFixed(4)}</b>\n` +
         (bepAdversePct > 0 ? `⚠️ Risiko BEP Divergence: <b>+${bepAdversePct.toFixed(2)}% lebih mahal</b>\n` : '') +
-        `🎯 Target Pullback Sniper: <b>${targetOp} $${targetPullbackPrice.toFixed(4)}</b>\n\n` +
-        `🛡️ <i>Sistem menahan penambahan layer demi memastikan harga averaging sama atau lebih menguntungkan, serta <b>MENGUNCI PROTEKSI BEP</b> agar akun Anda tidak merugi jika Leader menutup posisi di Break-Even Point. Bot akan <b>OTOMATIS MENAMBAH LAYER</b> seketika harga pullback.</i>`,
+        (!isDiscountMode ? `🎯 Target Pullback Sniper: <b>${targetOp} $${targetPullbackPrice.toFixed(4)}</b>\n\n` : '\n') +
+        `🛡️ <i>Sistem menahan penambahan layer demi memastikan harga averaging sama atau lebih menguntungkan${isDiscountMode ? ` (diskon minimal <b>${reqDiscountPct.toFixed(1)}%</b>)` : ''}, serta <b>MENGUNCI PROTEKSI BEP</b> agar akun Anda tidak merugi jika Leader menutup posisi di Break-Even Point. Bot akan <b>OTOMATIS MENAMBAH LAYER</b> seketika harga pullback.</i>`,
         60000
       );
       return null;
@@ -3209,20 +3305,23 @@ export class CopyTradeEngine {
       // 5. Cek apakah kondisi Pullback (Slippage 0 / Diskon / batas toleransi) sudah terpenuhi
       let isPullbackMatched = false;
       let discountPct = 0;
-      const allowedAdversePct = this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5);
+      const isDiscountMode = Boolean(this.config.discountEntryEnabled);
+      const allowedAdversePct = isDiscountMode ? 0.001 : (this.config.zeroSlippageOnly ? 0.01 : (this.config.maxSlippagePct || 0.5));
 
       if (targetUserSide === 'LONG') {
         const thresholdPrice = targetPrice * (1 + (allowedAdversePct / 100));
         if (markPrice <= thresholdPrice) {
           isPullbackMatched = true;
-          discountPct = ((targetPrice - markPrice) / targetPrice) * 100;
+          const refPrice = item.leaderLayerPrice || item.leaderEntryPrice;
+          discountPct = refPrice > 0 ? ((refPrice - markPrice) / refPrice) * 100 : 0;
         }
       } else {
         // SHORT
         const thresholdPrice = targetPrice * (1 - (allowedAdversePct / 100));
         if (markPrice >= thresholdPrice) {
           isPullbackMatched = true;
-          discountPct = ((markPrice - targetPrice) / targetPrice) * 100;
+          const refPrice = item.leaderLayerPrice || item.leaderEntryPrice;
+          discountPct = refPrice > 0 ? ((markPrice - refPrice) / refPrice) * 100 : 0;
         }
       }
 
@@ -3270,7 +3369,8 @@ export class CopyTradeEngine {
                 `🎯 <b>AUTO-SNIPER PULLBACK BERHASIL MASUK! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +
                 `🪙 Simbol: <b>${item.symbol}</b>\n` +
                 `📊 Arah Akun: <b>${targetUserSide === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}</b>${isInverse ? ' <i>(🔄 Inversi)</i>' : ''}\n` +
-                `👤 Entry Leader: <b>$${targetPrice}</b>\n` +
+                `👤 Entry Leader: <b>$${item.leaderEntryPrice}</b>\n` +
+                (targetPrice !== item.leaderEntryPrice ? `🎯 Target Pullback Diskon: <b>$${targetPrice.toFixed(4)}</b>\n` : '') +
                 `🎯 Entry Akun Anda: <b>$${executedPrice}</b>\n` +
                 `🔥 Hasil Slippage: <b>${discountText}</b>\n` +
                 `📦 Kuantitas: <b>${executedQty}</b>\n` +
@@ -3305,7 +3405,8 @@ export class CopyTradeEngine {
               this.sendTelegram(
                 `🎯 <b>AUTO-SNIPER AVERAGING DOWN MATCH! [⚡ SLIPPAGE 0/PLUS]</b>\n\n` +
                 `🪙 Simbol: <b>${item.symbol}</b> (${targetUserSide})\n` +
-                `👤 Target Pullback: <b>$${targetPrice.toFixed(4)}</b>\n` +
+                (item.leaderLayerPrice ? `👤 Harga Layer Leader: <b>$${item.leaderLayerPrice.toFixed(4)}</b>\n` : '') +
+                `🎯 Target Pullback: <b>$${targetPrice.toFixed(4)}</b>\n` +
                 `🎯 Harga Eksekusi: <b>$${markPrice}</b> (${discountText})\n` +
                 `📊 Rata-rata Leader: <b>$${leaderPos.entryPrice}</b>\n` +
                 (userPos ? `🛡️ Rata-rata Akun Anda: <b>$${userPos.entryPrice.toFixed(4)}</b> (BEP Safe)\n` : '') +

@@ -106,6 +106,8 @@ export interface AppConfig {
   reorderWindowMinutes?: number; // Batas toleransi waktu order susulan (re-order) dalam satuan menit (default: 30)
   zeroSlippageOnly?: boolean; // Hanya izinkan eksekusi jika harga sama atau lebih menguntungkan dari leader (Slippage 0 atau Plus)
   sniperPullbackEnabled?: boolean; // Otomatis mengeksekusi order tertahan saat harga pullback ke entry leader (default true)
+  discountEntryEnabled?: boolean; // Mengharuskan entry dengan diskon minimal tertentu lebih menguntungkan dari leader (Sniper Pullback)
+  discountEntryPct?: number; // Target persentase diskon harga lebih murah (default: 1.0%)
   syncLeverage: boolean;
   emergencySlPct: number;
   pollingIntervalMs: number;

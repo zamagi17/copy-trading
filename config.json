@@ -15,6 +15,8 @@
   "reorderWindowMinutes": 120,
   "zeroSlippageOnly": true,
   "sniperPullbackEnabled": true,
+  "discountEntryEnabled": false,
+  "discountEntryPct": 1,
   "syncLeverage": true,
   "emergencySlPct": 80,
   "pollingIntervalMs": 1500,
@@ -58,5 +60,9 @@
     "endTime": "18:30",
     "action": "FULL_STOP",
     "guardOpenPositions": true
+  },
+  "idleStandby": {
+    "enabled": true,
+    "idleIntervalSec": 5
   }
 }

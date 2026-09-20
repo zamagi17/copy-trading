@@ -254,6 +254,12 @@ export class DatabaseService {
     if (dbCfg.sniperPullbackEnabled === undefined) {
       merged.sniperPullbackEnabled = fileCfg.sniperPullbackEnabled !== undefined ? fileCfg.sniperPullbackEnabled : true;
     }
+    if (dbCfg.discountEntryEnabled === undefined) {
+      merged.discountEntryEnabled = fileCfg.discountEntryEnabled !== undefined ? fileCfg.discountEntryEnabled : false;
+    }
+    if (dbCfg.discountEntryPct === undefined) {
+      merged.discountEntryPct = fileCfg.discountEntryPct !== undefined ? fileCfg.discountEntryPct : 1.0;
+    }
 
     // Migrasi otomatis timezone CST -> WIB agar PostgreSQL tersinkronisasi
     if (merged.weekendBreak) {

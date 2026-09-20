@@ -171,6 +171,10 @@ const I18N = {
     hint_sniper_pullback: 'Jika harga saat order terdeteksi lebih buruk (kemahalan), order otomatis ditahan sementara. Bot memantau pergerakan harga setiap detik dan akan otomatis mengeksekusi seketika harga pullback kembali menyentuh harga entry leader atau lebih murah.',
     check_zero_slippage_only: '🛡️ Disiplin Ketat: Hanya Eksekusi di Slippage 0 atau Plus (Diskon)',
     hint_zero_slippage_only: '100% menolak harga yang lebih buruk dari entry leader. Akun Anda hanya akan masuk jika harga sama persis atau lebih murah/menguntungkan (Slippage 0 / Diskon).',
+    check_discount_entry: '🎯 Sniper Diskon Pullback (Wajib Masuk Lebih Menguntungkan dari Leader)',
+    hint_discount_entry: 'Tahan order di antrean Auto-Sniper sampai harga pullback memberikan diskon minimal tertentu lebih murah dari harga entry/layer Leader sebelum dieksekusi.',
+    label_discount_entry_pct: 'Target Minimal Diskon (%):',
+    hint_discount_entry_pct: 'Contoh: 1.0% = Long wajib beli 1.0% lebih murah di bawah entry Leader, Short wajib jual 1.0% lebih tinggi di atas entry Leader.',
     check_reverse_trading: '🔄 Mode Reverse Trading / Fade Leader (Posisi Terbalik)',
     hint_reverse_trading: 'Jika aktif, bot mengambil arah berlawanan (Leader LONG ➔ Akun SHORT, Leader SHORT ➔ Akun LONG). Berlaku hanya untuk posisi baru. Averaging down & penutupan tetap selaras dengan posisi aktif akun Anda.',
     legend_proxy: 'Residential Proxy (Anti Blokir Cloudflare)',
@@ -444,6 +448,10 @@ const I18N = {
     hint_sniper_pullback: 'If the market price moves worse (adverse slippage), the order is held. The bot monitors the price every second and auto-executes once price pulls back to leader entry or cheaper.',
     check_zero_slippage_only: '🛡️ Strict Discipline: Only Execute at Zero or Positive Slippage (Discount)',
     hint_zero_slippage_only: '100% rejects any price worse than leader entry. Your account will only fill if the price is identical or better/discounted (Zero/Positive Slippage).',
+    check_discount_entry: '🎯 Sniper Discount Pullback (Require Entry Cheaper Than Leader)',
+    hint_discount_entry: 'Hold order in Auto-Sniper queue until price pulls back to provide a minimum discount cheaper than Leader entry/layer before executing.',
+    label_discount_entry_pct: 'Target Minimum Discount (%):',
+    hint_discount_entry_pct: 'Example: 1.0% = Long buys 1.0% cheaper below Leader entry, Short sells 1.0% higher above Leader entry.',
     check_reverse_trading: '🔄 Reverse Trading Mode / Fade Leader (Opposite Position)',
     hint_reverse_trading: 'When enabled, bot opens opposite positions (Leader LONG ➔ User SHORT, Leader SHORT ➔ User LONG). Applies strictly to newly opened positions. Averaging down & closes remain aligned with your active position.',
     legend_proxy: 'Residential Proxy (Cloudflare Bypass)',
@@ -815,6 +823,22 @@ const inputReorderWindow = document.getElementById('inputReorderWindow');
 const checkSyncLeverage = document.getElementById('checkSyncLeverage');
 const checkSniperPullback = document.getElementById('checkSniperPullback');
 const checkZeroSlippageOnly = document.getElementById('checkZeroSlippageOnly');
+const checkDiscountEntry = document.getElementById('checkDiscountEntry');
+const inputDiscountEntryPct = document.getElementById('inputDiscountEntryPct');
+const discountEntrySettings = document.getElementById('discountEntrySettings');
+
+function toggleDiscountEntryInputs() {
+  if (!discountEntrySettings) return;
+  discountEntrySettings.style.display = checkDiscountEntry?.checked ? 'block' : 'none';
+}
+window.toggleDiscountEntryInputs = toggleDiscountEntryInputs;
+
+window.setDiscountPreset = function(pct) {
+  if (inputDiscountEntryPct) {
+    inputDiscountEntryPct.value = pct.toFixed(1);
+  }
+};
+
 const checkReverseTrading = document.getElementById('checkReverseTrading');
 const checkProxyEnabled = document.getElementById('checkProxyEnabled');
 const inputProxyHost = document.getElementById('inputProxyHost');
@@ -2249,6 +2273,9 @@ function openSettingsModal() {
   checkSyncLeverage.checked = currentConfig.syncLeverage ?? true;
   if (checkSniperPullback) checkSniperPullback.checked = currentConfig.sniperPullbackEnabled ?? true;
   if (checkZeroSlippageOnly) checkZeroSlippageOnly.checked = currentConfig.zeroSlippageOnly ?? true;
+  if (checkDiscountEntry) checkDiscountEntry.checked = currentConfig.discountEntryEnabled ?? false;
+  if (inputDiscountEntryPct) inputDiscountEntryPct.value = currentConfig.discountEntryPct ?? 1.0;
+  toggleDiscountEntryInputs();
   if (checkReverseTrading) checkReverseTrading.checked = currentConfig.reverseTrading ?? false;
 
   // Proxy
@@ -2597,6 +2624,8 @@ async function saveSettings() {
     syncLeverage: checkSyncLeverage.checked,
     sniperPullbackEnabled: checkSniperPullback ? checkSniperPullback.checked : true,
     zeroSlippageOnly: checkZeroSlippageOnly ? checkZeroSlippageOnly.checked : true,
+    discountEntryEnabled: checkDiscountEntry ? checkDiscountEntry.checked : false,
+    discountEntryPct: inputDiscountEntryPct ? (parseFloat(inputDiscountEntryPct.value) || 1.0) : 1.0,
     reverseTrading: checkReverseTrading ? checkReverseTrading.checked : false,
     proxy: {
       enabled: checkProxyEnabled.checked,
