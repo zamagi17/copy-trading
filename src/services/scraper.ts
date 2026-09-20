@@ -35,6 +35,7 @@ async function resolveBinanceIpViaDoH(): Promise<string | null> {
 export class CopyTradeScraper {
   private detailCache: Map<string, { data: any; perf?: any; lastFetch: number }> = new Map();
   private positionsCache: Map<string, { positions: LeadPosition[]; lastFetch: number }> = new Map();
+  private ordersCache: Map<string, { orders: LeadOrderRecord[]; lastFetch: number }> = new Map();
   private lastKnownOrderTime: Map<string, number> = new Map();
   private lastKnownOrderKey: Map<string, string> = new Map();
   private cachedClient: AxiosInstance | null = null;
@@ -52,6 +53,7 @@ export class CopyTradeScraper {
     this.cachedClient = null;
     this.cachedClientKey = '';
     this.positionsCache.clear();
+    this.ordersCache.clear();
     this.lastKnownOrderTime.clear();
     this.lastKnownOrderKey.clear();
   }
@@ -227,17 +229,16 @@ export class CopyTradeScraper {
   async fetchOrderHistory(portfolioId: string, proxy?: ProxyConfig, pageSize: number = 20): Promise<LeadOrderRecord[]> {
     if (!portfolioId || !portfolioId.trim()) return [];
 
+    const id = portfolioId.trim();
     try {
       const client = await this.createClient(proxy);
       const url = `/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/order-history`;
-      const now = Date.now();
-      const startTime = now - (12 * 60 * 60 * 1000); // Cukup 12 jam terakhir (menghemat bandwidth)
 
+      // CATATAN KRUSIAL: Endpoint publik Binance /order-history HANYA menerima { portfolioId }.
+      // Menambahkan startTime, endTime, pageSize, atau pageNumber menyebabkan Binance membalas
+      // error code 11012005 ("The system is currently busy. Please try again later.").
       const res = await client.post(url, {
-        portfolioId: portfolioId.trim(),
-        startTime,
-        endTime: now,
-        pageSize,
+        portfolioId: id,
       }, {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -245,8 +246,28 @@ export class CopyTradeScraper {
         },
       });
 
-      const root = res.data;
+      let root = res.data;
+      if (root?.code === '11012005') {
+        const cached = this.ordersCache.get(id);
+        if (cached && cached.orders.length > 0) {
+          return cached.orders;
+        }
+        // Cold start retry: tunggu 1.2 detik lalu coba 1x lagi agar baseline tidak kosong
+        await new Promise((r) => setTimeout(r, 1200));
+        const retryRes = await client.post(url, { portfolioId: id }, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+        });
+        root = retryRes.data;
+      }
+
       if (!root || (root.code && root.code !== '000000') || !root.data) {
+        const cached = this.ordersCache.get(id);
+        if (cached && cached.orders.length > 0) {
+          return cached.orders;
+        }
         throw new Error(`Binance API order-history error: code ${root?.code || 'EMPTY_RESPONSE'}`);
       }
 
@@ -308,8 +329,13 @@ export class CopyTradeScraper {
         });
       }
 
+      this.ordersCache.set(id, { orders, lastFetch: Date.now() });
       return orders;
     } catch (err: any) {
+      const cached = this.ordersCache.get(id);
+      if (cached && cached.orders.length > 0) {
+        return cached.orders;
+      }
       throw err;
     }
   }
